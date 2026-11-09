@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PvP Build Planner (beta)</title>
-<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.4.5">
+<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.4.6">
 </head>
 <body>
 <script>
 (function () {
   'use strict';
-  var PAGE_VER = "1.4.5";
+  var PAGE_VER = "1.4.6";
   var GRAB_SRC = "(function () {\nif (window.__sopvpGrab) { window.__sopvpGrab.show(); return; }\nvar PL = 'https://johnnyboyqc.github.io/stellar-odyssey-pvp-planner/', OR = 'https://johnnyboyqc.github.io';\nvar G = { squad: {}, roster: null, duels: {}, box: null };\nvar RE = /\\/api\\/squadrons\\/(battlelog|groups)(\\?|$)/;\nfunction abs(u) { try { return new URL(String((u && u.href) || u), location.href).href; } catch (e) { return String(u); } }\nfunction take(url, text) {\nvar b;\ntry { b = JSON.parse(text); } catch (e) { return; }\nif (/battlelog/.test(url)) (b && b.battles || []).forEach(function (x) { if (x && x._id && Array.isArray(x.logs)) G.squad[x._id] = x; });\nelse G.roster = { t: Date.now(), body: text };\ndraw();\n}\nvar XP = XMLHttpRequest.prototype, oO = XP.open, oS = XP.send;\nXP.open = function (m, u) { try { this.__sopvpG = abs(u); } catch (e) {} return oO.apply(this, arguments); };\nXP.send = function () {\nvar x = this;\ntry {\nif (RE.test(x.__sopvpG || '')) x.addEventListener('load', function () {\ntry {\nif (x.status < 200 || x.status >= 300) return;\nvar t = (x.responseType === '' || x.responseType === 'text') ? x.responseText : (x.responseType === 'json' ? JSON.stringify(x.response) : null);\nif (t) take(x.responseURL || x.__sopvpG, t);\n} catch (e) {}\n});\n} catch (e) {}\nreturn oS.apply(this, arguments);\n};\nvar oF = window.fetch;\nif (typeof oF === 'function') window.fetch = function (i) {\nvar p = oF.apply(this, arguments);\ntry {\nvar u = abs(typeof i === 'string' ? i : (i && i.url));\nif (RE.test(u)) p.then(function (r) { if (r.ok) r.clone().text().then(function (t) { take(r.url || u, t); }, function () {}); }, function () {});\n} catch (e) {}\nreturn p;\n};\nfunction state() {\ntry {\nvar el = document.querySelector('#q-app') || document.querySelector('#app'), a = el && el.__vue_app__;\nvar p = a && a.config && a.config.globalProperties && a.config.globalProperties.$pinia;\nreturn p && p.state && p.state.value;\n} catch (e) { return null; }\n}\nfunction copy(o) { try { return JSON.parse(JSON.stringify(o)); } catch (e) { return null; } }\nfunction tick() {\nvar st = state();\nif (!st) return;\ntry {\nvar A = st.PvPArenaStore, d = A && A.currentDuel;\nif (d && d._id && d.logs && d.logs.length && !G.duels[d._id]) { G.duels[d._id] = copy(d); draw(); }\nvar s = st.squadronStore;\nif (!G.roster && s && s.group1 && s.group1.length) { G.roster = { t: Date.now(), body: JSON.stringify({ squad: [{ group1: copy(s.group1), group2: copy(s.group2 || []), group3: copy(s.group3 || []), available: [] }] }) }; draw(); }\n} catch (e) {}\n}\nsetInterval(tick, 1000);\nfunction build(st) {\ntry {\nvar U = st.UserStore, P = U.player, mats = {};\n(P.pvp_gear || []).forEach(function (g) { mats[String(g.statCost || '').toLowerCase()] = 1; });\nvar slots = (st.PetsStore && st.PetsStore.petSlots) || [], inSlot = {};\nslots.forEach(function (x) { if (x && x.pet) inSlot[x.pet] = 1; });\nreturn {\nUserStore: { username: U.username, pvp_badges: U.pvp_badges, player: copy({ pvp_gear: P.pvp_gear, pvpstats: P.pvpstats, clones: P.clones }) },\nCraftStore: { crafting_level: st.CraftStore && st.CraftStore.crafting_level },\nMaterialsStore: { materialsList: ((st.MaterialsStore && st.MaterialsStore.materialsList) || []).filter(function (m) { var n = m && m.item && (m.item.name || m.item); return n && mats[String(n).toLowerCase()]; }).map(function (m) { return { item: { name: m.item.name || m.item }, quantity: m.quantity }; }) },\nPetsStore: { petSlots: slots.filter(function (x) { return x && x.pet; }).map(function (x) { return { pet: x.pet }; }), pets: ((st.PetsStore && st.PetsStore.pets) || []).filter(function (p) { return p && inSlot[p._id] && p.name === 'Velari'; }).map(function (p) { return { _id: p._id, name: p.name, level: p.level }; }) }\n};\n} catch (e) { return null; }\n}\nfunction payload() {\nvar st = state();\nreturn { app: 'PvP Planner button', v: 1, made: Date.now(), me: st && st.UserStore ? st.UserStore.username : null, build: st ? build(st) : null,\nsquad: Object.keys(G.squad).map(function (k) { return { battle: G.squad[k] }; }),\nduel: Object.keys(G.duels).map(function (k) { return { duel: G.duels[k], saved: Date.now() }; }),\nroster: G.roster ? [G.roster] : [] };\n}\nfunction send() {\nvar nonce = String(Math.random()).slice(2), w = window.open(PL + '#wait=' + nonce, '_blank');\nif (!w) { alert(L.p); return; }\nwindow.addEventListener('message', function on(e) {\nif (e.origin !== OR || !e.data || e.data.sopvpReady !== nonce || !e.source) return;\nwindow.removeEventListener('message', on);\ne.source.postMessage({ sopvpRaw: payload(), nonce: nonce }, OR);\n});\n}\nvar L = (function () {\nvar n = String((navigator.languages && navigator.languages[0]) || navigator.language || 'en').toLowerCase();\nvar T = {\nes: { b: 'batallas de escuadrón', d: 'duelos de arena', r: 'plantilla', y: 'sí', n: 'todavía no', h: 'Ahora recorre Registro de peleas › Escuadrón (50 por página, todas las páginas), abre Grupos de escuadrón y pulsa Ver pelea en tus duelos de arena. Deja esta pestaña abierta.', s: 'Enviar al planificador ↗', p: 'El navegador bloqueó la pestaña nueva: permite las ventanas emergentes de este sitio y vuelve a pulsar Enviar.' },\nzh: { b: '场舰队战斗', d: '场竞技场决斗', r: '名单', y: '已有', n: '还没有', h: '现在浏览 战斗日志 › 舰队（每页 50 条，每一页都看），打开舰队编组，并在竞技场决斗上点击查看战斗。请保持此标签页打开。', s: '发送到规划器 ↗', p: '浏览器拦截了新标签页：请允许本网站弹出窗口后再点一次发送。' },\nen: { b: 'squadron battles', d: 'arena duels', r: 'roster', y: 'yes', n: 'not yet', h: 'Now browse Battle Log › Squadron (50 per page, every page), open Squadron Groups, and click View battle on your arena duels. Keep this tab open.', s: 'Send to planner ↗', p: 'The browser blocked the new tab: allow pop-ups for this site, then click Send again.' }\n};\nreturn T[n.indexOf('es') === 0 ? 'es' : (n.indexOf('zh') === 0 ? 'zh' : 'en')];\n})();\nfunction draw() {\nif (!G.box) return;\nvar n = Object.keys(G.squad).length, d = Object.keys(G.duels).length;\nG.box.querySelector('.c').textContent = n + ' ' + L.b + ', ' + d + ' ' + L.d + ', ' + L.r + ': ' + (G.roster ? L.y : L.n);\n}\nfunction show() {\nif (G.box) { G.box.style.display = 'block'; return; }\nvar b = document.createElement('div');\nb.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;background:#1a2129;color:#d5dde6;border:1px solid #4fb3e8;border-radius:10px;padding:10px 12px;font:13px sans-serif;max-width:300px;box-shadow:0 4px 16px rgba(0,0,0,.4)';\nb.innerHTML = '<b>PvP Planner<\/b> <span style=\"float:right;cursor:pointer\" class=\"x\">✕<\/span><div class=\"c\" style=\"margin:6px 0\"><\/div>' +\n'<div class=\"h\" style=\"font-size:11px;color:#9aa8b6;margin-bottom:8px\"><\/div>' +\n'<button class=\"s\" style=\"background:#4fb3e8;color:#0d1b24;border:0;border-radius:7px;padding:6px 12px;font-weight:600;cursor:pointer\"><\/button>';\nb.querySelector('.s').textContent = L.s;\nb.querySelector('.h').textContent = L.h;\nb.querySelector('.x').onclick = function () { b.style.display = 'none'; };\nb.querySelector('.s').onclick = send;\ndocument.body.appendChild(b);\nG.box = b; draw();\n}\nwindow.__sopvpGrab = { show: show, data: G };\ntick(); show();\n})();";
 
   /* ============================================================
@@ -181,6 +181,28 @@
       'Group {0}': 'Grupo {0}',
       '(empty)': '(vacío)',
       'Bench': 'Reserva',
+      'estimated from {0} shots ({1}{2}%)': 'estimado de {0} disparos ({1}{2}%)',
+      'not enough fights yet': 'aún no hay suficientes peleas',
+      'crit {0}%, crit damage +{1}%, dual shot {2}%': 'crítico {0}%, daño crítico +{1}%, disparo doble {2}%',
+      '{0} different clones': '{0} clones distintos',
+      'exact': 'exacto',
+      'Total stats': 'Estadísticas totales',
+      'power + precision + evasion + hull': 'poder + precisión + evasión + casco',
+      'precision or evasion still unknown': 'precisión o evasión aún desconocidas',
+      'per clone hit, exact': 'por golpe de clon, exacto',
+      'per clone, exact': 'por clon, exacto',
+      'best guess, {0} skill events seen': 'mejor suposición, {0} efectos de habilidad vistos',
+      'likely, {0} skill events seen': 'probable, {0} efectos de habilidad vistos',
+      'Estimated build of {0}': 'Build estimado de {0}',
+      'Stat': 'Estadística',
+      'Value': 'Valor',
+      'How sure': 'Fiabilidad',
+      'Last fight: {0}. These numbers since: {1}. From {2} squadron battles and {3} duels.': 'Última pelea: {0}. Estos números desde: {1}. De {2} batallas de escuadrón y {3} duelos.',
+      'Old: the last fight with this player is more than 7 days ago, their build may have changed.': 'Antiguo: la última pelea con este jugador fue hace más de 7 días, su build puede haber cambiado.',
+      'Their damage, health or clones changed since older fights: precision and evasion also use fights from before the change, because the new build has too few yet.': 'Su daño, salud o clones cambiaron desde peleas anteriores: la precisión y la evasión también usan peleas de antes del cambio, porque el build nuevo aún tiene pocas.',
+      'Precision and evasion are worked out from how often they hit our members and how often our members missed them, against our members\' exact stats: the best fit to every shot in the logs. More fights make the ± smaller.': 'La precisión y la evasión se calculan a partir de cuántas veces golpean a nuestros miembros y cuántas veces nuestros miembros fallan contra ellos, con las estadísticas exactas de nuestros miembros: el mejor ajuste a cada disparo de los registros. Más peleas reducen el ±.',
+      'Click a player to see the build the estimate gives them. Seen is the last fight in game time, orange when more than 7 days ago; Build since is the first fight with their current damage, health and clones.': 'Pulsa un jugador para ver el build estimado. Visto es la última pelea en hora del juego, en naranja si fue hace más de 7 días; Build desde es la primera pelea con su daño, salud y clones actuales.',
+      'Build since': 'Build desde',
       'Nothing saved yet.': 'Aún no hay nada guardado.',
       'Download saved data': 'Descargar datos guardados',
       'saved in this browser': 'guardado en este navegador',
@@ -454,6 +476,28 @@
       'Group {0}': '小队 {0}',
       '(empty)': '（空）',
       'Bench': '替补',
+      'estimated from {0} shots ({1}{2}%)': '根据 {0} 次射击估算（{1}{2}%）',
+      'not enough fights yet': '战斗还不够多',
+      'crit {0}%, crit damage +{1}%, dual shot {2}%': '暴击 {0}%，暴击伤害 +{1}%，双发 {2}%',
+      '{0} different clones': '{0} 个不同的克隆体',
+      'exact': '精确',
+      'Total stats': '属性总和',
+      'power + precision + evasion + hull': '威力 + 精准 + 闪避 + 舰体',
+      'precision or evasion still unknown': '精准或闪避仍未知',
+      'per clone hit, exact': '每个克隆体每次命中，精确',
+      'per clone, exact': '每个克隆体，精确',
+      'best guess, {0} skill events seen': '最佳推测，已见 {0} 次技能效果',
+      'likely, {0} skill events seen': '较可能，已见 {0} 次技能效果',
+      'Estimated build of {0}': '{0} 的估算配置',
+      'Stat': '属性',
+      'Value': '数值',
+      'How sure': '可信度',
+      'Last fight: {0}. These numbers since: {1}. From {2} squadron battles and {3} duels.': '最近一次战斗：{0}。这些数值始于：{1}。来自 {2} 场舰队战斗和 {3} 场对决。',
+      'Old: the last fight with this player is more than 7 days ago, their build may have changed.': '较旧：与该玩家的最近一次战斗已超过 7 天，其配置可能已改变。',
+      'Their damage, health or clones changed since older fights: precision and evasion also use fights from before the change, because the new build has too few yet.': '与较早的战斗相比，其伤害、生命或克隆体已改变：由于新配置的战斗还太少，精准和闪避也使用了改变之前的战斗。',
+      'Precision and evasion are worked out from how often they hit our members and how often our members missed them, against our members\' exact stats: the best fit to every shot in the logs. More fights make the ± smaller.': '精准和闪避根据对方命中我方成员的频率以及我方成员未命中对方的频率，结合我方成员的精确属性计算：与日志中每一次射击最吻合的数值。战斗越多，± 越小。',
+      'Click a player to see the build the estimate gives them. Seen is the last fight in game time, orange when more than 7 days ago; Build since is the first fight with their current damage, health and clones.': '点击玩家查看估算出的配置。“最近”为游戏时间的最近一次战斗，超过 7 天显示为橙色；“配置始于”为其当前伤害、生命和克隆体的第一次战斗。',
+      'Build since': '配置始于',
       'Nothing saved yet.': '还没有保存任何数据。',
       'Download saved data': '下载已保存的数据',
       'saved in this browser': '保存在此浏览器中',
@@ -1140,7 +1184,7 @@
       var cl = last.cl;
       if (!cl && last.c) cl = last.c.map(function (c) { return [c[0], c[1], c[2]]; });
       function r3(f) { return f ? [Math.round(f.v), Math.round(f.se * 1000) / 1000, f.n] : null; }
-      out.push({ name: u, sq: p.sq, g: p.g || 0, own: ownNames[u] || p.sq === own ? 1 : 0, t: p.t, nb: p.nb, nd: p.nd, snaps: p.snaps.length, mixed: mixed,
+      out.push({ bt: last.t0, bl: last.t1, name: u, sq: p.sq, g: p.g || 0, own: ownNames[u] || p.sq === own ? 1 : 0, t: p.t, nb: p.nb, nd: p.nd, snaps: p.snaps.length, mixed: mixed,
         d: last.d, h: last.h, n: last.n, cl: cl || [[0, 0, 0]], P: r3(pp), E: r3(ee), sk: sk ? sk.s : null, skc: sk ? sk.conf : 0, skn: sk ? sk.n : 0 });
     });
     out.sort(function (x, y) { return y.t - x.t; });
@@ -1903,6 +1947,37 @@
     sk.forEach(function (x, i) { if (x) o.push((W[n[i]] || n[i]) + (x > 1 ? ' x' + x : '')); });
     return o.join(', ') || (W.none || 'none');
   }
+  // A fight older than this is marked as old.
+  var VS_OLD_MS = 7 * 86400000;
+  function vsOld(ms) { return ms && Date.now() - ms > VS_OLD_MS; }
+  // The build the estimate gives a player: power and hull exact from the
+  // logs, precision and evasion the best fit with their doubt, skills the
+  // most likely set, and the dates it rests on.
+  function vsBuildCard(p) {
+    var N = p.n || 1, pow = p.d / N, hull = p.h / (7 * N), pm = '±';
+    function est(f) { return f ? { t: grp(f[0]) + ' ' + pm + grp(Math.round(f[0] * f[1])), c: f[1] > 0.25 ? 'warn' : '' } : { t: '?', c: 'mu' }; }
+    function sure(f) { return f ? t('estimated from {0} shots ({1}{2}%)', [grp(Math.round(f[2] || 0)), pm, Math.round(f[1] * 100)]) : t('not enough fights yet'); }
+    var tot = pow + hull + (p.P ? p.P[0] : 0) + (p.E ? p.E[0] : 0);
+    var cl = p.cl || [[0, 0, 0]], c0 = cl[0];
+    var clTxt = cl.length === 1 ? t('crit {0}%, crit damage +{1}%, dual shot {2}%', [c0[0], c0[1], c0[2]]) : t('{0} different clones', [cl.length]);
+    var rows = [
+      [t('Power'), grp(Math.round(pow)), t('exact')],
+      [t('Precision'), est(p.P), sure(p.P)],
+      [t('Evasion'), est(p.E), sure(p.E)],
+      [t('Hull'), grp(Math.round(hull)), t('exact')],
+      [t('Total stats'), (p.P && p.E ? '' : '≥ ') + grp(Math.round(tot)), p.P && p.E ? t('power + precision + evasion + hull') : t('precision or evasion still unknown')],
+      [t('Damage'), grp(p.d), t('per clone hit, exact')],
+      [t('Health'), grp(p.h), t('per clone, exact')],
+      [t('Clones'), String(N), clTxt],
+      [t('Skills'), skTxt(p.sk) + (p.sk && p.skc < 0.6 ? ' ?' : ''), p.sk ? (p.skc < 0.6 ? t('best guess, {0} skill events seen', [p.skn || 0]) : t('likely, {0} skill events seen', [p.skn || 0])) : t('not enough fights yet')]
+    ];
+    var h = sect(t('Estimated build of {0}', [p.name])) + tbl([t('Stat'), t('Value'), t('How sure')], rows);
+    h += line(t('Last fight: {0}. These numbers since: {1}. From {2} squadron battles and {3} duels.', [whenTxt(p.bl || p.t), whenTxt(p.bt || p.t), p.nb || 0, p.nd || 0]), vsOld(p.bl || p.t) ? 'warn' : 'mu');
+    if (vsOld(p.bl || p.t)) h += line(t('Old: the last fight with this player is more than 7 days ago, their build may have changed.'), 'warn');
+    if (p.mixed) h += line(t('Their damage, health or clones changed since older fights: precision and evasion also use fights from before the change, because the new build has too few yet.'), 'warn');
+    h += line(t('Precision and evasion are worked out from how often they hit our members and how often our members missed them, against our members\' exact stats: the best fit to every shot in the logs. More fights make the ± smaller.'), 'mu');
+    return h;
+  }
   function estTxt(f) {
     if (!f) return { t: '?', c: 'mu' };
     return { t: grp(f[0]) + ' ±' + Math.round(f[1] * 100) + '%', c: f[1] > 0.25 ? 'warn' : '' };
@@ -1956,15 +2031,18 @@
     else if (k === 'player') {
       var q = (VS.q || '').toLowerCase(), list = IMP.x.players.filter(function (p) { return !q || p.name.toLowerCase().indexOf(q) >= 0 || String(p.sq || '').toLowerCase().indexOf(q) >= 0; });
       h += '<div class="grid"><label>Find a player or squadron<input type="search" id="f_vsq" value="' + esc(VS.q || '') + '" placeholder="name"></label></div>';
-      h += '<div class="card wide"><table class="t pick"><thead><tr><th>Player</th><th>Squadron</th><th>Seen</th><th>Damage</th><th>Health</th><th>Clones</th><th>Precision</th><th>Evasion</th><th>Skills</th></tr></thead><tbody>' +
+      h += '<div class="card wide"><table class="t pick"><thead><tr><th>Player</th><th>Squadron</th><th>Seen</th><th>Build since</th><th>Damage</th><th>Health</th><th>Clones</th><th>Precision</th><th>Evasion</th><th>Skills</th></tr></thead><tbody>' +
         list.slice(0, 40).map(function (p) {
           var e1 = estTxt(p.P), e2 = estTxt(p.E);
-          return '<tr data-pick="' + esc(p.name) + '"' + (p.name === VS.pl ? ' class="hl"' : '') + '><td><b>' + esc(p.name) + '</b></td><td>' + esc(p.sq || 'arena') + '</td><td>' + esc(whenTxt(p.t)) + '</td><td>' + esc(grp(p.d)) + '</td><td>' + esc(grp(p.h)) +
+          return '<tr data-pick="' + esc(p.name) + '"' + (p.name === VS.pl ? ' class="hl"' : '') + '><td><b>' + esc(p.name) + '</b></td><td>' + esc(p.sq || 'arena') + '</td><td' + (vsOld(p.t) ? ' class="warn"' : '') + '>' + esc(whenTxt(p.t)) + '</td><td>' + esc(p.bt ? whenTxt(p.bt) : '?') + '</td><td>' + esc(grp(p.d)) + '</td><td>' + esc(grp(p.h)) +
             '</td><td>' + p.n + '</td><td class="' + e1.c + '">' + esc(e1.t) + '</td><td class="' + e2.c + '">' + esc(e2.t) + '</td><td>' + esc(skTxt(p.sk)) + (p.sk && p.skc < 0.6 ? ' ?' : '') + '</td></tr>';
         }).join('') + '</tbody></table></div>';
       if (list.length > 40) h += line((list.length - 40) + ' more: type part of a name to find them.', 'mu');
       if (!list.length) h += line('No player matches.', 'mu');
       h += line('Damage and health are per clone hit and per clone, exactly as the game sent them. ± is the doubt in the estimate (one standard error); "?" after the skills means they are a best guess.', 'mu');
+      h += line(t('Click a player to see the build the estimate gives them. Seen is the last fight in game time, orange when more than 7 days ago; Build since is the first fight with their current damage, health and clones.'), 'mu');
+      var picked = vsCard(VS.pl);
+      if (picked) h += vsBuildCard(picked);
     } else if (k === 'squad') {
       h += '<div class="card wide"><table class="t pick"><thead><tr><th>Squadron</th><th>Members seen</th><th>Last seen</th></tr></thead><tbody>' + vsSquads().map(function (q) {
         return '<tr data-sq="' + esc(q.name) + '"' + (q.name === VS.sq ? ' class="hl"' : '') + '><td><b>' + esc(q.name) + '</b>' + (q.own ? ' (yours)' : '') + '</td><td>' + q.n + '</td><td>' + esc(whenTxt(q.t)) + '</td></tr>';
