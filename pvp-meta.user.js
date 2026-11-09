@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Stellar Odyssey – PvP Meta
 // @namespace    stellarodyssey-pvpmeta
-// @version      1.2.0
-// @description  Arena build planner for Stellar Odyssey: the meta split at your own total stat, the best free re-spec, which upgrades pay, and a record of your duels. Built from Astrolabe 3.22.8's simulator. Keeps the squadron battles, arena duels and roster you browse, and opens them in the web planner in one click (player and squadron picker). Reads the page only: no network requests, no game actions.
+// @version      1.3.0
+// @description  Arena build planner for Stellar Odyssey: the meta split at your own total stat, the best free re-spec, which upgrades pay, and a record of your duels. Built from Astrolabe 3.22.9's simulator. Keeps the squadron battles, arena duels and roster you browse, and opens them in the web planner in one click (player and squadron picker). Reads the page only: no network requests, no game actions.
 // @match        *://steam.stellarodyssey.app/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -591,7 +591,7 @@
   }
 
   /* ============================================================
-     FROM ASTROLABE 3.22.8 (copied unchanged by the build step)
+     FROM ASTROLABE 3.22.9 (copied unchanged by the build step)
      ============================================================ */
 
   var AR_MAX = 200;
@@ -936,6 +936,12 @@
           else if (e.action === 'attack blocked') { A.hit++; get(dO || ao).blocked++; }
           else A.miss++;
           // A dual shot is one log line holding both shots; arDamage reads it.
+        } else if (e.action === 'DoT triggers') {
+          // A DoT charge that kills ends the swing that burnt it: no attack
+          // line follows, but the swing landed (counting it as missing read
+          // the opponent's evasion about 3% high).
+          var hk = arHp(e.hpLeft);
+          if (hk && hk.hp <= 0) { if (first === null) first = ao; A.att++; A.hit++; }
         } else if (e.action === 'applies DoT') A.dot++;
         else if (e.action === 'stuns') A.stun++;
         else if (e.action === 'focused') A.focus++;

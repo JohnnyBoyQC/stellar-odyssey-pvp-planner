@@ -37,8 +37,19 @@ With the userscript installed, open **⚔ PvP Meta** in the game and click **Ope
 - Open **Squadron Groups** in the game once, so your own members' stats are known: that is what the estimates are measured against.
 - The data travels inside the link after `#`, which browsers never send to any server, and is then kept only in your browser. You can also load the file from ⚙ › Battle archive › Download with **Load archive file**.
 
+## Squadron group builder (1.3)
+
+Under **Squadron groups** the page shows your squadron's roster exactly as Squadron Groups sent it (stats, gear level/tier, clones, Velari, active), and the enemy groups met in your battles, with their members in fight order.
+
+- Untick whoever won't be there, tick up to 3 enemy groups, and click **Build the best groups**. It tries swaps and every fight order, and fights each pairing in the squadron simulator (a relay: one member per side at a time, defender first, kill debuff), half attacking and half defending.
+- You get the suggested groups in fight order, a win-chance table against each enemy group (and the same table for your current groups), each with an error bar, and plain text to paste in chat.
+- Changing groups stays something you do yourself in the game.
+
+**No script?** Someone who has PvP Meta clicks **Save a share file** and posts it in the squadron chat; anyone can load it with **Load file**. It holds the player cards, enemy groups and roster, not the sharer's build or duels. Your own arena duels still need the script.
+
 ## What changed
 
+- **1.3** (script and page): squadron group builder with a 3x3 win table, share file for players without the script, squadron simulator. The duel recorder now counts a hit that kills with a DoT tick.
 - **1.2** (script and page): Open in planner, player and squadron picker, new arena duels keep the opponent's name, dark theme by default, beta label.
 - **1.1** (script and page): the duel engine follows rules measured on real fight logs. DoT is applied before the block roll. A dual shot is one swing on one target, and its second shot needs its own hit and block. Damage is rounded down. The duel recorder now reads dual shots and crit damage correctly (older versions mistook dual shots for crits). Plus the battle archive above.
 - **1.0**: first release.

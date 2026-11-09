@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PvP Build Planner (beta)</title>
-<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.2.1">
+<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.3.0">
 </head>
 <body>
 <script>
 (function () {
   'use strict';
-  var PAGE_VER = "1.2.1";
+  var PAGE_VER = "1.3.0";
 
   /* ============================================================
      PvP Build Planner (web page)
@@ -53,18 +53,25 @@
       PV_CONTESTED: PV_CONTESTED, PV_DECIDED: PV_DECIDED, PV_FLOOR: PV_FLOOR, PV_MAX_BATTLES: PV_MAX_BATTLES, PV_MIN_EACH: PV_MIN_EACH,
       PV_SEARCH_MAX: PV_SEARCH_MAX, PV_SEED: PV_SEED, PV_SIMS: PV_SIMS,
       PV_META: PV_META, PV_META_COPIES: PV_META_COPIES,
-      RL_A: RL_A, RL_B: RL_B, RL_MAX_CLONES: RL_MAX_CLONES, RL_MAX_ROUNDS: RL_MAX_ROUNDS
+      RL_A: RL_A, RL_B: RL_B, RL_MAX_CLONES: RL_MAX_CLONES, RL_MAX_ROUNDS: RL_MAX_ROUNDS, SQ_MAX_ROUNDS: SQ_MAX_ROUNDS
     };
   }
   function WK_FNS() {
     return [numOr, btRng, arAssume, arDraws, arSide, pvAllocate, pvBestAssign, pvCompositions, pvCopy, pvGap, pvGearBase, pvGearVal, pvLevelCost,
       pvMetaPool, pvNeedFor, pvPlanRun, pvPool, pvPoolRef, pvReplay, pvSample, pvScore, pvScoreOf, pvSkills, pvSpend, pvTerm,
-      pvTierCost, pvTotals, pvUpgradeRows, rlDuel, rlLeft, rlLoad, rlMe, rlPhase, rlSlot, rngStreams];
+      pvTierCost, pvTotals, pvUpgradeRows, rlDuel, rlLeft, rlLoad, rlMe, rlPhase, rlSlot, rngStreams,
+      sqDebuff, sqSide, sqEnter, sqHealth, sqPhase, sqFight, gbNorm, gbDraw, gbGroup, gbPerms, gbStr, gbOrder, gbOptimise];
   }
   function wkMain() {
     self.onmessage = function (e) {
       var job = e.data;
       try {
+        if (job.kind === 'gb') {
+          var res = gbOptimise(job.pool, job.start, job.enemies, job.opt, function (t) { self.postMessage({ type: 'prog', t: t }); });
+          self.postMessage({ type: 'gb', res: res });
+          self.postMessage({ type: 'done' });
+          return;
+        }
         pvPlanRun(job.pv, job.recs, job.keep, function (plan, err) {
           self.postMessage({ type: 'plan', plan: plan || null, err: err ? String((err && err.message) || err) : null });
           self.postMessage({ type: 'done' });
@@ -681,6 +688,142 @@
   }
 
   /* ============================================================
+     SQUADRON GROUP BUILDER (1.3.0)
+
+     Splits the members who will play into groups of up to four, and puts
+     each group in the order that wins most, against the enemy groups
+     chosen: every pairing is fought by the relay simulator, half attacking
+     and half defending. The score is the expected number of wins over all
+     our-group x enemy-group pairings.
+
+     Enemy precision and evasion are estimates: every simulated fight draws
+     them afresh within their error bars, so the win chances carry that doubt.
+     The same luck is used for every lineup compared (fight i against enemy
+     group e always has the same rolls), so differences between lineups are
+     steadier than the chances themselves.
+     ============================================================ */
+
+  function gbNorm(r) {
+    var u = Math.max(1e-12, r()), v = r();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  }
+  // A member with its precision and evasion drawn within their error bars.
+  function gbDraw(M, r) {
+    if (!(M.seP > 0) && !(M.seE > 0)) return M;
+    var c = {};
+    for (var k in M) c[k] = M[k];
+    c.prec = M.prec * Math.exp(gbNorm(r) * (M.seP || 0));
+    c.eva = M.eva * Math.exp(gbNorm(r) * (M.seE || 0));
+    return c;
+  }
+
+  // One of our groups (ordered members) against each enemy group.
+  // Returns per enemy group {p, se, rounds}, and their mean.
+  function gbGroup(G, enemies, sims, seed) {
+    var out = [], tot = 0;
+    if (!G.length) return { p: 0, cells: enemies.map(function () { return { p: 0, se: 0, rounds: 0, n: 0 }; }) };
+    for (var e = 0; e < enemies.length; e++) {
+      var w = 0, rr = 0;
+      for (var i = 0; i < sims; i++) {
+        var s = (seed + e * 104729 + i * 7919) | 0, r = btRng(s ^ 0x5bd1e995);
+        var E = enemies[e].map(function (m) { return gbDraw(m, r); });
+        var f = i % 2 === 0 ? sqFight(G, E, s, false) : sqFight(E, G, s, false);
+        w += i % 2 === 0 ? f.win : 1 - f.win; rr += f.rounds;
+      }
+      var p = w / sims;
+      out.push({ p: p, se: Math.sqrt(Math.max(p * (1 - p), 0.25 / sims) / sims), rounds: rr / sims, n: sims });
+      tot += p;
+    }
+    return { p: tot / enemies.length, cells: out };
+  }
+
+  function gbPerms(n) {
+    var out = [];
+    (function rec(cur, left) {
+      if (!left.length) { out.push(cur); return; }
+      left.forEach(function (x, i) { rec(cur.concat([x]), left.slice(0, i).concat(left.slice(i + 1))); });
+    })([], Array.from({ length: n }, function (_, i) { return i; }));
+    return out;
+  }
+  function gbStr(m) { return m.dmg * m.hp * m.N * m.N; }
+
+  // The best order of one group: every order when quick is false, else the
+  // two simple ones (weakest first, strongest first).
+  function gbOrder(G, enemies, sims, seed, quick) {
+    if (G.length <= 1) return { g: G.slice(), p: gbGroup(G, enemies, sims, seed).p };
+    var cands;
+    if (quick) {
+      var up = G.slice().sort(function (a, b) { return gbStr(a) - gbStr(b); });
+      cands = [up, up.slice().reverse()];
+    } else cands = gbPerms(G.length).map(function (pm) { return pm.map(function (i) { return G[i]; }); });
+    var best = null;
+    cands.forEach(function (c) { var p = gbGroup(c, enemies, sims, seed).p; if (!best || p > best.p + 1e-9) best = { g: c, p: p }; });
+    return best;
+  }
+
+  // pool: our members who will play (relay members with .id); start: arrays
+  // of ids per group (the current groups); enemies: list of enemy groups
+  // (relay members, ordered); size: members per group. progress(text) is
+  // called now and then. Returns {groups:[[member]], bench:[member], matrix,
+  // now: matrix of the current groups, gain}.
+  function gbOptimise(pool, start, enemies, opt, progress) {
+    opt = opt || {};
+    var size = opt.size || 4, nG = opt.groups || 3, simsQ = opt.simsQuick || 40, simsO = opt.simsOrder || 80, simsF = opt.simsFinal || 400, seed = opt.seed || 17;
+    var byId = {};
+    pool.forEach(function (m) { byId[m.id] = m; });
+    var groups = [], used = {};
+    for (var g = 0; g < nG; g++) {
+      var ids = (start && start[g]) || [];
+      groups.push(ids.filter(function (id) { return byId[id] && !used[id] && (used[id] = 1); }).slice(0, size).map(function (id) { return byId[id]; }));
+    }
+    var bench = pool.filter(function (m) { return !used[m.id]; }).sort(function (a, b) { return gbStr(b) - gbStr(a); });
+    // Empty places are filled from the bench, strongest first, smallest group first.
+    while (bench.length) {
+      var open = groups.map(function (G, i) { return { i: i, n: G.length }; }).filter(function (x) { return x.n < size; }).sort(function (a, b) { return a.n - b.n; });
+      if (!open.length) break;
+      groups[open[0].i].push(bench.shift());
+    }
+    var startGroups = groups.map(function (G) { return G.slice(); });
+    function q(G) { return gbOrder(G, enemies, simsQ, seed, true); }
+    var cur = groups.map(q), evals = groups.length;
+    // Swaps: any two members of different groups, or a member and a benched one.
+    var improved = true, pass = 0;
+    while (improved && pass < (opt.passes || 4)) {
+      improved = false; pass++;
+      for (var a = 0; a < nG; a++) {
+        for (var b = a; b <= nG; b++) {   // b === nG is the bench
+          var A = groups[a], B = b === nG ? bench : groups[b];
+          if (b === a) continue;
+          for (var i = 0; i < A.length; i++) {
+            for (var j = 0; j <= B.length; j++) {
+              // j === B.length: move A[i] into B when B has room (not the bench)
+              if (j === B.length && (b === nG || B.length >= size || A.length <= 1)) continue;
+              var A2 = A.slice(), B2 = B.slice();
+              if (j < B.length) { var t = A2[i]; A2[i] = B2[j]; B2[j] = t; } else { B2.push(A2.splice(i, 1)[0]); }
+              var na = q(A2), nb = b === nG ? null : q(B2);
+              evals += b === nG ? 1 : 2;
+              var before = cur[a].p + (b === nG ? 0 : cur[b].p), after = na.p + (nb ? nb.p : 0);
+              if (after > before + 0.004) {
+                groups[a] = A2; cur[a] = na; A = A2;
+                if (b === nG) { bench = B2; B = bench; } else { groups[b] = B2; cur[b] = nb; B = B2; }
+                improved = true;
+              }
+            }
+          }
+        }
+        if (progress) progress('Trying swaps: pass ' + pass + ', ' + evals + ' lineups tried');
+      }
+    }
+    // Each group in its best order, from every possible order.
+    var final = groups.map(function (G, k) { if (progress) progress('Choosing the order of group ' + (k + 1)); return gbOrder(G, enemies, simsO, seed + 1, false).g; });
+    if (progress) progress('Final check with ' + simsF + ' fights per pairing');
+    var matrix = final.map(function (G) { return gbGroup(G, enemies, simsF, seed + 2); });
+    var now = startGroups.map(function (G) { return gbGroup(G, enemies, simsF, seed + 2); });
+    var sum = function (M) { return M.reduce(function (s, x) { return s + x.p; }, 0); };
+    return { groups: final, bench: bench, matrix: matrix, now: now, start: startGroups, gain: (sum(matrix) - sum(now)) / Math.max(1, nG), evals: evals };
+  }
+
+  /* ============================================================
      IMPORT AND OPPONENT PICKER (1.2.0)
 
      The PvP Meta userscript's "Open in planner" button sends the build,
@@ -743,7 +886,12 @@
     rd.onload = function () {
       try {
         var a = JSON.parse(rd.result);
-        if (!a || !Array.isArray(a.squad)) throw new Error('this is not a PvP Meta archive file');
+        if (a && a.app === 'PvP Meta share' && a.x && Array.isArray(a.x.players)) {
+          impTake({ x: a.x, duels: [], root: null, made: a.made || Date.now(), ver: a.ver || '?' }, 'share');
+          impMsg('Loaded the share file from ' + (a.x.me || 'a squadmate') + ': ' + a.x.players.length + ' players, ' + (a.x.battles ? a.x.battles.length : 0) + ' squadron battles. Load your own build with your API key above.', 'good');
+          return;
+        }
+        if (!a || !Array.isArray(a.squad)) throw new Error('this is not a PvP Meta archive or share file');
         var pv = S.storeOk ? readPvp(S.storeState) : null, me = S.storeState && S.storeState.UserStore ? S.storeState.UserStore.username : null;
         // Without a loaded build, our name is the one in every opened duel.
         if (!me) {
@@ -766,6 +914,18 @@
     rd.readAsText(file);
   }
 
+  // A file for squadmates without the script: the cards, groups and roster,
+  // not the sharer's own build or duel records.
+  function impShare() {
+    if (!IMP) { impMsg('Import from PvP Meta first.', 'bad'); return; }
+    var o = { app: 'PvP Meta share', v: 1, ver: PAGE_VER, made: IMP.made, x: IMP.x };
+    var url = URL.createObjectURL(new Blob([JSON.stringify(o)], { type: 'application/json' })), a = document.createElement('a');
+    a.href = url; a.download = 'pvp-share-' + (IMP.x.own || 'squadron').replace(/[^\w-]+/g, '_') + '-' + new Date().toISOString().slice(0, 10) + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+    impMsg('Saved. Post the file in your squadron chat: anyone can load it here with Load file, no script needed. It holds the player cards, enemy groups and your squadron roster, not your own build.', 'good');
+  }
+
   function impMsg(t, cls) { var el = root.querySelector('#impmsg'); if (el) { el.textContent = t || ''; el.className = 'line ' + (cls || ''); } }
   function impStatus(warn) {
     var el = root.querySelector('#impstat');
@@ -779,7 +939,7 @@
     x.players.forEach(function (p) { if (p.sq) sq[p.sq] = 1; });
     el.innerHTML = '<div class="tiles">' + tile('Players', String(x.players.length), Object.keys(sq).length + ' squadrons') + tile('Squadron battles', String(x.battles ? x.battles.length : 0), x.own ? 'yours: ' + x.own : '') +
       tile('Arena duels', String(IMP.duels.length), IMP.duels.filter(function (r) { return r.nm; }).length + ' with names') + '</div>' +
-      line('Imported ' + ago(IMP.made) + (IMP.src === 'file' ? ' from the archive file' : ' from PvP Meta' + (IMP.ver && IMP.ver !== '?' ? ' ' + IMP.ver : '')) + '. Kept in this browser only.' + (x.roster ? '' : ' No Squadron Groups roster in it yet: open Squadron Groups once in the game so your own members\' precision and evasion are known, which sharpens every estimate.'), x.roster ? 'mu' : 'warn') +
+      line('Imported ' + ago(IMP.made) + (IMP.src === 'share' ? ' from a share file by ' + (x.me || 'a squadmate') : IMP.src === 'file' ? ' from the archive file' : ' from PvP Meta' + (IMP.ver && IMP.ver !== '?' ? ' ' + IMP.ver : '')) + '. Kept in this browser only.' + (x.roster ? '' : ' No Squadron Groups roster in it yet: open Squadron Groups once in the game so your own members\' precision and evasion are known, which sharpens every estimate.'), x.roster ? 'mu' : 'warn') +
       (warn ? line(warn, 'warn') : '');
   }
 
@@ -904,6 +1064,7 @@
     var el = root.querySelector('#vsbody');
     if (!el) return;
     impStatus();
+    renderSq();
     var k = vsKind(), h = vsSeg();
     if (!IMP && (k === 'player' || k === 'squad' || k === 'duels')) h += line('Import from PvP Meta first (above).', 'warn');
     else if (k === 'duels' && IMP.duels.length < PV_FLOOR) h += line('Only ' + IMP.duels.length + ' duels on record, under the ' + PV_FLOOR + ' needed: the plan uses the meta field until then.', 'warn');
@@ -933,6 +1094,152 @@
     if (qi) qi.addEventListener('input', function () {
       VS.q = qi.value; var pos = qi.selectionStart; renderVs();
       var n = root.querySelector('#f_vsq'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} }
+    });
+  }
+
+  /* ============================================================
+     SQUADRON GROUPS (1.3.0): the page section
+
+     Your roster exactly as Squadron Groups showed it (stats, gear, clones,
+     Velari, active), the enemy groups met in your battles, who plays, and
+     the best split into groups and order against the enemy groups chosen,
+     with a 3 x 3 table of win chances. Changing groups stays something you
+     do yourself in the game.
+     ============================================================ */
+
+  var SQG = Object.assign({ off: {}, foes: null }, store.get('sqg', {}));
+  var SQ_RES = null, SQ_BUSY = false, SQ_MSG = '', SQ_W = null;
+
+  function sqgSave() { store.set('sqg', { off: SQG.off, foes: SQG.foes }); }
+  function sqgRoster() { return IMP && IMP.x.roster ? IMP.x.roster.m : []; }
+  function sqgFoeGroups() {
+    if (!IMP || !IMP.x.groups) return [];
+    return IMP.x.groups.filter(function (g) { return !g.own && g.m && g.m.length; });
+  }
+  function sqgKey(g) { return g.sq + '|' + g.g; }
+  function sqgChosen() {
+    var all = sqgFoeGroups(), keys = SQG.foes;
+    if (!keys) keys = all.slice(0, 3).map(sqgKey);
+    return all.filter(function (g) { return keys.indexOf(sqgKey(g)) >= 0; }).slice(0, 3);
+  }
+  function sqgPlays(m) { return SQG.off[m.user] === undefined ? m.active : !SQG.off[m.user]; }
+
+  function sqgOwnMember(m) { var x = sqMember(m); x.id = m.user; return x; }
+  function sqgFoeMember(name) {
+    var c = vsCard(name);
+    if (!c) return null;
+    var x = sqMember(c);
+    x.id = name;
+    x.seP = c.P ? Math.max(0.03, c.P[1]) : 0.5;
+    x.seE = c.E ? Math.max(0.03, c.E[1]) : 0.5;
+    return x;
+  }
+  function sqgFoeTeam(g) { return g.m.map(sqgFoeMember).filter(Boolean); }
+
+  function sqgRun() {
+    if (SQ_BUSY) return;
+    var ros = sqgRoster(), foes = sqgChosen();
+    var pool = ros.filter(sqgPlays).map(sqgOwnMember);
+    if (!pool.length || !foes.length) { SQ_MSG = !pool.length ? 'Nobody is ticked to play.' : 'Tick at least one enemy group.'; renderSq(); return; }
+    var start = [1, 2, 3].map(function (g) { return ros.filter(function (m) { return m.g === g && sqgPlays(m); }).sort(function (a, b) { return a.pos - b.pos; }).map(function (m) { return m.user; }); });
+    var job = { kind: 'gb', pool: pool, start: start, enemies: foes.map(sqgFoeTeam), opt: { groups: 3, size: 4 } };
+    SQ_BUSY = true; SQ_MSG = 'Working: the first answer takes 10 to 40 seconds.'; SQ_RES = null; renderSq();
+    var done = function (res, err) {
+      SQ_BUSY = false; SQ_W = null;
+      if (err || !res) SQ_MSG = 'The group builder failed: ' + (err || 'no answer');
+      else { SQ_RES = { res: res, foes: foes, at: Date.now() }; SQ_MSG = ''; }
+      renderSq();
+    };
+    SQ_W = wkRun(job, function (m) {
+      if (m.type === 'prog') { SQ_MSG = m.t; var el = root.querySelector('#sqmsg'); if (el) el.textContent = m.t; }
+      else if (m.type === 'gb') done(m.res, null);
+      else if (m.type === 'error') done(null, m.err);
+    });
+    if (!SQ_W) setTimeout(function () { try { done(gbOptimise(job.pool, job.start, job.enemies, job.opt, null), null); } catch (e) { done(null, e.message); } }, 30);
+  }
+
+  function sqgPct(c) { return Math.round(c.p * 100) + '%'; }
+  function sqgCell(c) {
+    // the doubt: luck of the simulation plus the doubt in the enemy estimates (already inside p)
+    var cls = c.p >= 0.6 ? 'good' : (c.p <= 0.4 ? 'bad' : '');
+    return { t: sqgPct(c) + ' ±' + Math.max(1, Math.round(c.se * 200)), c: cls };
+  }
+  function sqgFoeName(g) { return g.sq + ' G' + g.g; }
+
+  function sqgText(r) {
+    var lines = ['Squadron groups (PvP Build Planner, ' + new Date(r.at).toLocaleDateString() + '):'];
+    r.res.groups.forEach(function (G, i) {
+      lines.push('Group ' + (i + 1) + ': ' + (G.length ? G.map(function (m, k) { return (k + 1) + '. ' + m.name; }).join('  ') : '(empty)'));
+    });
+    if (r.res.bench.length) lines.push('Bench: ' + r.res.bench.map(function (m) { return m.name; }).join(', '));
+    lines.push('Win chance (half attacking, half defending):');
+    r.res.matrix.forEach(function (row, i) {
+      lines.push('  Group ' + (i + 1) + ': ' + row.cells.map(function (c, k) { return 'vs ' + sqgFoeName(r.foes[k]) + ' ' + sqgPct(c); }).join(', '));
+    });
+    return lines.join('\n');
+  }
+
+  function renderSq() {
+    var el = root.querySelector('#sqbody');
+    if (!el) return;
+    var ros = sqgRoster(), h = '';
+    if (!IMP) { el.innerHTML = line('Import from PvP Meta first (above).', 'mu'); return; }
+    if (!ros.length) { el.innerHTML = line('No roster yet. In the game, open Squadron Groups once (PvP Meta keeps it), then click Open in planner again.', 'warn'); return; }
+    // Our roster, exactly as the game sent it
+    h += '<div class="card wide"><table class="t pick"><thead><tr><th>Plays</th><th>Member</th><th>Now</th><th>Damage</th><th>Health</th><th>Clones</th><th>Precision</th><th>Evasion</th><th>Skills</th><th>Gear (level/tier)</th></tr></thead><tbody>' +
+      ros.slice().sort(function (a, b) { return (a.g || 9) - (b.g || 9) || a.pos - b.pos; }).map(function (m) {
+        return '<tr><td><input type="checkbox" data-play="' + esc(m.user) + '"' + (sqgPlays(m) ? ' checked' : '') + '></td><td><b>' + esc(m.user) + '</b>' + (m.active ? '' : ' <span class="mu">(inactive)</span>') + '</td><td>' + (m.g ? 'G' + m.g + ' #' + m.pos : 'free') +
+          '</td><td>' + grp(m.d) + '</td><td>' + grp(m.h) + '</td><td>' + m.N + '</td><td>' + grp(Math.round(m.tot.precision)) + '</td><td>' + grp(Math.round(m.tot.evasion)) + '</td><td>' + esc(skTxt(m.sk)) + '</td><td>' +
+          esc(m.gear.map(function (g) { return cap(g.stat).slice(0, 3) + ' ' + g.L + '/' + g.T; }).join(', ')) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+    h += line('Exact, from the Squadron Groups answer ' + ago(IMP.x.roster.t) + ' (damage per clone hit, health per clone). Untick whoever will not be there; it is remembered on this device.', 'mu');
+    // Enemy groups
+    var foes = sqgFoeGroups(), chosen = sqgChosen().map(sqgKey);
+    h += sect('Enemy groups to plan against (up to 3)');
+    if (!foes.length) h += line('No enemy group in your battles yet.', 'warn');
+    else h += '<div class="card wide"><table class="t pick"><thead><tr><th></th><th>Group</th><th>Members, in fight order</th><th>Met</th><th>Last seen</th></tr></thead><tbody>' +
+      foes.slice(0, 30).map(function (g) {
+        var k = sqgKey(g);
+        return '<tr><td><input type="checkbox" data-foe="' + esc(k) + '"' + (chosen.indexOf(k) >= 0 ? ' checked' : '') + '></td><td><b>' + esc(sqgFoeName(g)) + '</b></td><td>' + esc(g.m.join(', ')) + '</td><td>' + g.n + 'x</td><td>' + esc(whenTxt(g.t)) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+    h += '<div class="btns"><button class="pri" id="b_sqrun"' + (SQ_BUSY ? ' disabled' : '') + '>' + (SQ_BUSY ? 'Working...' : 'Build the best groups') + '</button></div>';
+    h += '<div class="line" id="sqmsg">' + esc(SQ_MSG) + '</div>';
+    if (SQ_RES) {
+      var r = SQ_RES.res, f = SQ_RES.foes, head = ['Your group'].concat(f.map(sqgFoeName)).concat(['Average']);
+      h += sect('Suggested groups, in fight order');
+      h += tbl(['Group', 'Members (1 fights first)'], r.groups.map(function (G, i) {
+        var was = r.start[i].map(function (m) { return m.id; }).join(), is = G.map(function (m) { return m.id; }).join();
+        return ['Group ' + (i + 1), { t: G.map(function (m, k) { return (k + 1) + '. ' + m.name; }).join('   ') || '(empty)', c: was === is ? '' : 'good' }];
+      }).concat(r.bench.length ? [['Bench', r.bench.map(function (m) { return m.name; }).join(', ')]] : []));
+      h += sect('Win chance, suggested groups');
+      h += tbl(head, r.matrix.map(function (row, i) { return ['Group ' + (i + 1)].concat(row.cells.map(sqgCell)).concat([{ t: sqgPct(row), c: 'b' }]); }));
+      h += sect('Win chance, groups as they are now');
+      h += tbl(head, r.now.map(function (row, i) { return ['Group ' + (i + 1) + ' now'].concat(row.cells.map(sqgCell)).concat([{ t: sqgPct(row), c: 'b' }]); }));
+      var gain = Math.round(r.gain * 100 * f.length);
+      h += line(gain > 0 ? 'The suggested groups win about ' + (Math.round(r.gain * f.length * 30) / 10) + ' more of these ' + (3 * f.length) + ' pairings than the current ones (' + (gain > 0 ? '+' : '') + Math.round(r.gain * 100) + ' points of average win chance).' : 'Your current groups are already as good as anything found.', gain > 0 ? 'good' : 'mu');
+      h += line('Each chance is from ' + r.matrix[0].cells[0].n + ' simulated relay fights, half attacking and half defending, with the kill debuff. ± is two standard errors of that count; the doubt in the enemies\' precision and evasion is already inside the chance, because each fight draws them within their error bars. Enemies seen in few battles carry more doubt.', 'mu');
+      h += sect('To paste in chat');
+      h += '<textarea id="sqtxt" readonly rows="' + (r.groups.length + r.matrix.length + 4) + '" style="width:100%;box-sizing:border-box;font:12px monospace;background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:8px;padding:8px">' + esc(sqgText(SQ_RES)) + '</textarea>';
+      h += '<div class="btns"><button class="sec" id="b_sqcopy">Copy</button></div>';
+      h += line('Groups are changed in the game, by hand (a group holding or attacking a zone cannot be edited until it is free).', 'mu');
+    }
+    el.innerHTML = h;
+    el.querySelectorAll('input[data-play]').forEach(function (c) {
+      c.addEventListener('change', function () { var u = c.getAttribute('data-play'), m = ros.filter(function (x) { return x.user === u; })[0]; if (c.checked === m.active) delete SQG.off[u]; else SQG.off[u] = !c.checked; sqgSave(); });
+    });
+    el.querySelectorAll('input[data-foe]').forEach(function (c) {
+      c.addEventListener('change', function () {
+        var keys = sqgChosen().map(sqgKey), k = c.getAttribute('data-foe');
+        keys = keys.filter(function (x) { return x !== k; });
+        if (c.checked) keys.push(k);
+        SQG.foes = keys.slice(-3); sqgSave(); renderSq();
+      });
+    });
+    var b = el.querySelector('#b_sqrun'); if (b) b.addEventListener('click', sqgRun);
+    var cp = el.querySelector('#b_sqcopy');
+    if (cp) cp.addEventListener('click', function () {
+      var ta = el.querySelector('#sqtxt'); ta.select();
+      try { navigator.clipboard.writeText(ta.value).then(function () { cp.textContent = 'Copied'; }, function () { document.execCommand('copy'); cp.textContent = 'Copied'; }); } catch (e) { document.execCommand('copy'); cp.textContent = 'Copied'; }
     });
   }
 
@@ -2150,11 +2457,13 @@
     '<div class="line">Your key is sent only to the game\'s own public API, straight from this browser. Each load uses 1 of your 50 daily calls to /user; a load within 30 minutes reuses the last answer for free.</div>' +
     '</div>' +
     '<div class="box" style="margin-top:16px"><h4 style="margin-top:0">Your duels and squadron battles</h4><div id="impstat"></div>' +
-    '<div class="btns"><label class="sec filebtn">Load archive file (.json)<input type="file" id="f_arcfile" accept=".json,application/json"></label><button class="sec" id="b_impclr">Forget imported data</button></div>' +
+    '<div class="btns"><label class="sec filebtn">Load file (.json)<input type="file" id="f_arcfile" accept=".json,application/json"></label><button class="sec" id="b_impshare">Save a share file</button><button class="sec" id="b_impclr">Forget imported data</button></div>' +
+    '<div class="line mu">No script? Ask a squadmate who has PvP Meta for their share file, and load it here.</div>' +
     '<div id="impmsg" class="line"></div></div>' +
     '<div id="status"></div>' +
     '<div class="box" style="margin:10px 0 12px"><h4 style="margin-top:0">Plan against</h4><div id="vsbody"></div></div>' +
     '<div id="out"></div>' +
+    '<div class="box" style="margin-top:16px"><h4 style="margin-top:0">Squadron groups</h4><div id="sqbody"></div></div>' +
     '<div class="box" style="margin-top:16px"><h4 style="margin-top:0">Settings</h4><div class="grid">' +
     '<label>Badges to keep<input type="number" min="0" step="1" id="f_kb" value="' + esc(String(S.inputs.keepBadges)) + '"></label>' +
     '<label>Least gain worth a change (win %)<input type="number" min="0" step="any" id="f_gap" value="' + esc(String(S.inputs.bestGap)) + '"></label>' +
@@ -2253,6 +2562,7 @@
   }
 
   $('f_arcfile').addEventListener('change', function () { var f = $('f_arcfile').files[0]; if (f) impFile(f); $('f_arcfile').value = ''; });
+  $('b_impshare').addEventListener('click', impShare);
   $('b_impclr').addEventListener('click', function () {
     if (!confirm('Forget the imported duels and battles? They stay in the PvP Meta archive in the game tab.')) return;
     IMP = null; store.set('imp', null); impMsg(''); renderVs(); render();
