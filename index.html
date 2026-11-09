@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PvP Build Planner (beta)</title>
-<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.4.2">
+<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.4.3">
 </head>
 <body>
 <script>
 (function () {
   'use strict';
-  var PAGE_VER = "1.4.2";
+  var PAGE_VER = "1.4.3";
   var GRAB_SRC = "(function () {\nif (window.__sopvpGrab) { window.__sopvpGrab.show(); return; }\nvar PL = 'https://johnnyboyqc.github.io/stellar-odyssey-pvp-planner/', OR = 'https://johnnyboyqc.github.io';\nvar G = { squad: {}, roster: null, duels: {}, box: null };\nvar RE = /\\/api\\/squadrons\\/(battlelog|groups)(\\?|$)/;\nfunction abs(u) { try { return new URL(String((u && u.href) || u), location.href).href; } catch (e) { return String(u); } }\nfunction take(url, text) {\nvar b;\ntry { b = JSON.parse(text); } catch (e) { return; }\nif (/battlelog/.test(url)) (b && b.battles || []).forEach(function (x) { if (x && x._id && Array.isArray(x.logs)) G.squad[x._id] = x; });\nelse G.roster = { t: Date.now(), body: text };\ndraw();\n}\nvar XP = XMLHttpRequest.prototype, oO = XP.open, oS = XP.send;\nXP.open = function (m, u) { try { this.__sopvpG = abs(u); } catch (e) {} return oO.apply(this, arguments); };\nXP.send = function () {\nvar x = this;\ntry {\nif (RE.test(x.__sopvpG || '')) x.addEventListener('load', function () {\ntry {\nif (x.status < 200 || x.status >= 300) return;\nvar t = (x.responseType === '' || x.responseType === 'text') ? x.responseText : (x.responseType === 'json' ? JSON.stringify(x.response) : null);\nif (t) take(x.responseURL || x.__sopvpG, t);\n} catch (e) {}\n});\n} catch (e) {}\nreturn oS.apply(this, arguments);\n};\nvar oF = window.fetch;\nif (typeof oF === 'function') window.fetch = function (i) {\nvar p = oF.apply(this, arguments);\ntry {\nvar u = abs(typeof i === 'string' ? i : (i && i.url));\nif (RE.test(u)) p.then(function (r) { if (r.ok) r.clone().text().then(function (t) { take(r.url || u, t); }, function () {}); }, function () {});\n} catch (e) {}\nreturn p;\n};\nfunction state() {\ntry {\nvar el = document.querySelector('#q-app') || document.querySelector('#app'), a = el && el.__vue_app__;\nvar p = a && a.config && a.config.globalProperties && a.config.globalProperties.$pinia;\nreturn p && p.state && p.state.value;\n} catch (e) { return null; }\n}\nfunction copy(o) { try { return JSON.parse(JSON.stringify(o)); } catch (e) { return null; } }\nfunction tick() {\nvar st = state();\nif (!st) return;\ntry {\nvar A = st.PvPArenaStore, d = A && A.currentDuel;\nif (d && d._id && d.logs && d.logs.length && !G.duels[d._id]) { G.duels[d._id] = copy(d); draw(); }\nvar s = st.squadronStore;\nif (!G.roster && s && s.group1 && s.group1.length) { G.roster = { t: Date.now(), body: JSON.stringify({ squad: [{ group1: copy(s.group1), group2: copy(s.group2 || []), group3: copy(s.group3 || []), available: [] }] }) }; draw(); }\n} catch (e) {}\n}\nsetInterval(tick, 1000);\nfunction build(st) {\ntry {\nvar U = st.UserStore, P = U.player, mats = {};\n(P.pvp_gear || []).forEach(function (g) { mats[String(g.statCost || '').toLowerCase()] = 1; });\nvar slots = (st.PetsStore && st.PetsStore.petSlots) || [], inSlot = {};\nslots.forEach(function (x) { if (x && x.pet) inSlot[x.pet] = 1; });\nreturn {\nUserStore: { username: U.username, pvp_badges: U.pvp_badges, player: copy({ pvp_gear: P.pvp_gear, pvpstats: P.pvpstats, clones: P.clones }) },\nCraftStore: { crafting_level: st.CraftStore && st.CraftStore.crafting_level },\nMaterialsStore: { materialsList: ((st.MaterialsStore && st.MaterialsStore.materialsList) || []).filter(function (m) { var n = m && m.item && (m.item.name || m.item); return n && mats[String(n).toLowerCase()]; }).map(function (m) { return { item: { name: m.item.name || m.item }, quantity: m.quantity }; }) },\nPetsStore: { petSlots: slots.filter(function (x) { return x && x.pet; }).map(function (x) { return { pet: x.pet }; }), pets: ((st.PetsStore && st.PetsStore.pets) || []).filter(function (p) { return p && inSlot[p._id] && p.name === 'Velari'; }).map(function (p) { return { _id: p._id, name: p.name, level: p.level }; }) }\n};\n} catch (e) { return null; }\n}\nfunction payload() {\nvar st = state();\nreturn { app: 'PvP Planner button', v: 1, made: Date.now(), me: st && st.UserStore ? st.UserStore.username : null, build: st ? build(st) : null,\nsquad: Object.keys(G.squad).map(function (k) { return { battle: G.squad[k] }; }),\nduel: Object.keys(G.duels).map(function (k) { return { duel: G.duels[k], saved: Date.now() }; }),\nroster: G.roster ? [G.roster] : [] };\n}\nfunction send() {\nvar nonce = String(Math.random()).slice(2), w = window.open(PL + '#wait=' + nonce, '_blank');\nif (!w) { alert(L.p); return; }\nwindow.addEventListener('message', function on(e) {\nif (e.origin !== OR || !e.data || e.data.sopvpReady !== nonce || !e.source) return;\nwindow.removeEventListener('message', on);\ne.source.postMessage({ sopvpRaw: payload(), nonce: nonce }, OR);\n});\n}\nvar L = (function () {\nvar n = String((navigator.languages && navigator.languages[0]) || navigator.language || 'en').toLowerCase();\nvar T = {\nes: { b: 'batallas de escuadrón', d: 'duelos de arena', r: 'plantilla', y: 'sí', n: 'todavía no', h: 'Ahora recorre Registro de peleas › Escuadrón (50 por página, todas las páginas), abre Grupos de escuadrón y pulsa Ver pelea en tus duelos de arena. Deja esta pestaña abierta.', s: 'Enviar al planificador ↗', p: 'El navegador bloqueó la pestaña nueva: permite las ventanas emergentes de este sitio y vuelve a pulsar Enviar.' },\nzh: { b: '场舰队战斗', d: '场竞技场决斗', r: '名单', y: '已有', n: '还没有', h: '现在浏览 战斗日志 › 舰队（每页 50 条，每一页都看），打开舰队编组，并在竞技场决斗上点击查看战斗。请保持此标签页打开。', s: '发送到规划器 ↗', p: '浏览器拦截了新标签页：请允许本网站弹出窗口后再点一次发送。' },\nen: { b: 'squadron battles', d: 'arena duels', r: 'roster', y: 'yes', n: 'not yet', h: 'Now browse Battle Log › Squadron (50 per page, every page), open Squadron Groups, and click View battle on your arena duels. Keep this tab open.', s: 'Send to planner ↗', p: 'The browser blocked the new tab: allow pop-ups for this site, then click Send again.' }\n};\nreturn T[n.indexOf('es') === 0 ? 'es' : (n.indexOf('zh') === 0 ? 'zh' : 'en')];\n})();\nfunction draw() {\nif (!G.box) return;\nvar n = Object.keys(G.squad).length, d = Object.keys(G.duels).length;\nG.box.querySelector('.c').textContent = n + ' ' + L.b + ', ' + d + ' ' + L.d + ', ' + L.r + ': ' + (G.roster ? L.y : L.n);\n}\nfunction show() {\nif (G.box) { G.box.style.display = 'block'; return; }\nvar b = document.createElement('div');\nb.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;background:#1a2129;color:#d5dde6;border:1px solid #4fb3e8;border-radius:10px;padding:10px 12px;font:13px sans-serif;max-width:300px;box-shadow:0 4px 16px rgba(0,0,0,.4)';\nb.innerHTML = '<b>PvP Planner<\/b> <span style=\"float:right;cursor:pointer\" class=\"x\">✕<\/span><div class=\"c\" style=\"margin:6px 0\"><\/div>' +\n'<div class=\"h\" style=\"font-size:11px;color:#9aa8b6;margin-bottom:8px\"><\/div>' +\n'<button class=\"s\" style=\"background:#4fb3e8;color:#0d1b24;border:0;border-radius:7px;padding:6px 12px;font-weight:600;cursor:pointer\"><\/button>';\nb.querySelector('.s').textContent = L.s;\nb.querySelector('.h').textContent = L.h;\nb.querySelector('.x').onclick = function () { b.style.display = 'none'; };\nb.querySelector('.s').onclick = send;\ndocument.body.appendChild(b);\nG.box = b; draw();\n}\nwindow.__sopvpGrab = { show: show, data: G };\ntick(); show();\n})();";
 
   /* ============================================================
@@ -181,6 +181,20 @@
       'Group {0}': 'Grupo {0}',
       '(empty)': '(vacío)',
       'Bench': 'Reserva',
+      'Team builder': 'Constructor de equipo',
+      'Team': 'Equipo',
+      'Build your own team: pick who fights in each place of each group (1 fights first). Whoever is not placed is on the bench. Then test it against the enemy groups ticked above.': 'Arma tu propio equipo: elige quién pelea en cada puesto de cada grupo (el 1 pelea primero). Quien no tenga puesto queda en la reserva. Luego pruébalo contra los grupos enemigos marcados arriba.',
+      'Test this team': 'Probar este equipo',
+      'Reset to the groups as they are now': 'Volver a los grupos actuales',
+      'Copy the suggested groups into the team builder': 'Copiar los grupos sugeridos al constructor de equipo',
+      'Win chance, your team': 'Probabilidad de ganar, tu equipo',
+      'Best groups': 'Mejores grupos',
+      'Working: a few seconds.': 'Calculando: unos segundos.',
+      'Put at least one member in a group.': 'Pon al menos a un miembro en un grupo.',
+      'Group {0} has more than 4 members.': 'El grupo {0} tiene más de 4 miembros.',
+      'Your team: +{0} points of average win chance over the groups as they are now.': 'Tu equipo: +{0} puntos de probabilidad media de ganar sobre los grupos actuales.',
+      'Your team: {0} points of average win chance under the groups as they are now.': 'Tu equipo: {0} puntos de probabilidad media de ganar por debajo de los grupos actuales.',
+      'Your team: about the same as the groups as they are now.': 'Tu equipo: más o menos igual que los grupos actuales.',
       'Win chance (half attacking, half defending):': 'Probabilidad de ganar (mitad atacando, mitad defendiendo):',
       'Exact, from the Squadron Groups answer {0} (damage per clone hit, health per clone). Untick whoever will not be there; it is remembered on this device.': 'Exacto, de los datos de Grupos de escuadrón ({0}) (daño por golpe de clon, salud por clon). Desmarca a quien no vaya a estar; se recuerda en este dispositivo.',
       // ---- page lines (numbers as {0}, {1}...)
@@ -418,6 +432,20 @@
       'Group {0}': '小队 {0}',
       '(empty)': '（空）',
       'Bench': '替补',
+      'Team builder': '编队工具',
+      'Team': '编队',
+      'Build your own team: pick who fights in each place of each group (1 fights first). Whoever is not placed is on the bench. Then test it against the enemy groups ticked above.': '组建你自己的队伍：为每个小队的每个位置选择出战成员（1 号最先出战）。没有安排位置的成员为替补。然后对上面勾选的敌方小队进行测试。',
+      'Test this team': '测试这个队伍',
+      'Reset to the groups as they are now': '恢复为当前小队',
+      'Copy the suggested groups into the team builder': '把建议的小队复制到编队工具',
+      'Win chance, your team': '胜率：你的队伍',
+      'Best groups': '最佳小队',
+      'Working: a few seconds.': '计算中：几秒钟。',
+      'Put at least one member in a group.': '至少把一名成员放进小队。',
+      'Group {0} has more than 4 members.': '第 {0} 小队超过 4 名成员。',
+      'Your team: +{0} points of average win chance over the groups as they are now.': '你的队伍：平均胜率比当前小队高 {0} 个百分点。',
+      'Your team: {0} points of average win chance under the groups as they are now.': '你的队伍：平均胜率比当前小队低 {0} 个百分点。',
+      'Your team: about the same as the groups as they are now.': '你的队伍：与当前小队差不多。',
       'Win chance (half attacking, half defending):': '胜率（一半进攻，一半防守）：',
       'Exact, from the Squadron Groups answer {0} (damage per clone hit, health per clone). Untick whoever will not be there; it is remembered on this device.': '精确值，来自舰队编组数据（{0}）（每个克隆体每次攻击的伤害，每个克隆体的生命）。取消勾选不在场的人；此设备会记住你的选择。',
       'This page plans your PvP build and your squadron groups. First bring in your data, in one of these ways:': '本页帮你规划 PvP 配置和舰队小队。首先用以下任一方式导入数据：',
@@ -634,6 +662,12 @@
         if (job.kind === 'gb') {
           var res = gbOptimise(job.pool, job.start, job.enemies, job.opt, function (t) { self.postMessage({ type: 'prog', t: t }); });
           self.postMessage({ type: 'gb', res: res });
+          self.postMessage({ type: 'done' });
+          return;
+        }
+        if (job.kind === 'gbt') {
+          var one = function (G) { return gbGroup(G, job.enemies, job.sims, job.seed); };
+          self.postMessage({ type: 'gbt', res: { mine: job.mine.map(one), now: job.now.map(one) } });
           self.postMessage({ type: 'done' });
           return;
         }
@@ -1817,10 +1851,76 @@
      do yourself in the game.
      ============================================================ */
 
-  var SQG = Object.assign({ off: {}, foes: null }, store.get('sqg', {}));
+  var SQG = Object.assign({ off: {}, foes: null, set: null }, store.get('sqg', {}));
   var SQ_RES = null, SQ_BUSY = false, SQ_MSG = '', SQ_W = null;
+  var SQ_MY = null, SQ_MYBUSY = false, SQ_MYMSG = '';
 
-  function sqgSave() { store.set('sqg', { off: SQG.off, foes: SQG.foes }); }
+  function sqgSave() { store.set('sqg', { off: SQG.off, foes: SQG.foes, set: SQG.set }); }
+
+  /* ---- team builder (1.4.3): each member placed by hand in a group and a
+     place, or on the bench, then tested against the chosen enemy groups
+     with the same fights as the builder's final check, next to the groups
+     as they are now. Kept on this device. */
+  var SQ_SIMS = 400, SQ_SEED = 19;   // as gbOptimise's final check (simsFinal, seed + 2)
+  function sqgSlot(m) {
+    var v = SQG.set && SQG.set[m.user];
+    return v ? v : [m.g || 0, m.pos || 1];
+  }
+  function sqgMyGroups() {
+    var ros = sqgRoster(), out = [[], [], []];
+    ros.forEach(function (m, i) { var s = sqgSlot(m); if (s[0] >= 1 && s[0] <= 3) out[s[0] - 1].push({ m: m, pos: s[1], i: i }); });
+    return out.map(function (G) { return G.sort(function (a, b) { return a.pos - b.pos || a.i - b.i; }).map(function (x) { return x.m; }); });
+  }
+  function sqgNowGroups() {
+    var ros = sqgRoster();
+    return [1, 2, 3].map(function (g) { return ros.filter(function (m) { return m.g === g; }).sort(function (a, b) { return a.pos - b.pos; }); });
+  }
+  function sqgMyRun() {
+    if (SQ_MYBUSY) return;
+    var foes = sqgChosen(), mine = sqgMyGroups();
+    if (!foes.length) { SQ_MYMSG = 'Tick at least one enemy group.'; renderSq(); return; }
+    if (!mine.some(function (G) { return G.length; })) { SQ_MYMSG = 'Put at least one member in a group.'; renderSq(); return; }
+    var big = mine.map(function (G, i) { return G.length > 4 ? i + 1 : 0; }).filter(Boolean);
+    if (big.length) { SQ_MYMSG = t('Group {0} has more than 4 members.', [big.join(', ')]); renderSq(); return; }
+    var job = { kind: 'gbt', mine: mine.map(function (G) { return G.map(sqgOwnMember); }), now: sqgNowGroups().map(function (G) { return G.map(sqgOwnMember); }),
+      enemies: foes.map(sqgFoeTeam), sims: SQ_SIMS, seed: SQ_SEED };
+    var bench = sqgRoster().filter(function (m) { var s = sqgSlot(m); return !(s[0] >= 1 && s[0] <= 3); }).map(sqgOwnMember);
+    SQ_MYBUSY = true; SQ_MYMSG = 'Working: a few seconds.'; renderSq();
+    var done = function (res, err) {
+      SQ_MYBUSY = false;
+      if (err || !res) SQ_MYMSG = 'The test failed: ' + (err || 'no answer');
+      else { SQ_MY = { res: { groups: job.mine, bench: bench, matrix: res.mine, now: res.now }, foes: foes, at: Date.now() }; SQ_MYMSG = ''; }
+      renderSq();
+    };
+    var calc = function () {
+      var one = function (G) { return gbGroup(G, job.enemies, job.sims, job.seed); };
+      return { mine: job.mine.map(one), now: job.now.map(one) };
+    };
+    var w = wkRun(job, function (m) {
+      if (m.type === 'gbt') done(m.res, null);
+      else if (m.type === 'error') done(null, m.err);
+    });
+    if (!w) setTimeout(function () { try { done(calc(), null); } catch (e) { done(null, e.message); } }, 30);
+  }
+  function sqgBuilder() {
+    var ros = sqgRoster(), G = sqgMyGroups(), placed = {}, h = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px">';
+    G.forEach(function (g) { g.forEach(function (m) { placed[m.user] = 1; }); });
+    for (var gi = 0; gi < 3; gi++) {
+      h += '<div class="card" style="padding:8px 10px"><b>' + esc(t('Group {0}', [gi + 1])) + '</b>';
+      for (var p = 0; p < 4; p++) {
+        var who = G[gi][p] ? G[gi][p].user : '';
+        h += '<div style="display:flex;align-items:center;gap:6px;margin-top:6px"><span class="mu" style="width:16px">' + (p + 1) + '.</span><select data-slot="' + (gi + 1) + '-' + (p + 1) + '" style="flex:1;min-width:0">' +
+          '<option value=""' + (who ? '' : ' selected') + '>-</option>' +
+          ros.map(function (m) { return '<option value="' + esc(m.user) + '"' + (m.user === who ? ' selected' : '') + '>' + esc(m.user) + '</option>'; }).join('') + '</select></div>';
+      }
+      h += '</div>';
+    }
+    var bench = ros.filter(function (m) { return !placed[m.user]; }).map(function (m) { return m.user; });
+    return h + '</div>' + line(t('Bench') + ': ' + (bench.length ? bench.join(', ') : '-'), 'mu');
+  }
+  function sqgMatrix(head, rows, label) {
+    return tbl(head, rows.map(function (row, i) { return [label(i)].concat(row.cells.map(sqgCell)).concat([{ t: sqgPct(row), c: 'b' }]); }));
+  }
   function sqgRoster() { return IMP && IMP.x.roster ? IMP.x.roster.m : []; }
   function sqgFoeGroups() {
     if (!IMP || !IMP.x.groups) return [];
@@ -1912,6 +2012,28 @@
         var k = sqgKey(g);
         return '<tr><td><input type="checkbox" data-foe="' + esc(k) + '"' + (chosen.indexOf(k) >= 0 ? ' checked' : '') + '></td><td><b>' + esc(sqgFoeName(g)) + '</b></td><td>' + esc(g.m.join(', ')) + '</td><td>' + g.n + 'x</td><td>' + esc(whenTxt(g.t)) + '</td></tr>';
       }).join('') + '</tbody></table></div>';
+    h += sect('Team builder');
+    h += line('Build your own team: pick who fights in each place of each group (1 fights first). Whoever is not placed is on the bench. Then test it against the enemy groups ticked above.', 'mu');
+    h += sqgBuilder();
+    h += '<div class="btns"><button class="pri" id="b_sqmy"' + (SQ_MYBUSY ? ' disabled' : '') + '>' + (SQ_MYBUSY ? 'Working...' : 'Test this team') + '</button>' +
+      '<button class="sec" id="b_sqreset">Reset to the groups as they are now</button>' + (SQ_RES ? '<button class="sec" id="b_sqtake">Copy the suggested groups into the team builder</button>' : '') + '</div>';
+    h += '<div class="line" id="sqmymsg">' + esc(SQ_MYMSG) + '</div>';
+    if (SQ_MY) {
+      var my = SQ_MY.res, mf = SQ_MY.foes, mhead = ['Your group'].concat(mf.map(sqgFoeName)).concat(['Average']);
+      h += tbl(['Group', 'Members (1 fights first)'], my.groups.map(function (G, i) {
+        return ['Group ' + (i + 1), G.map(function (m, k) { return (k + 1) + '. ' + m.name; }).join('   ') || '(empty)'];
+      }).concat(my.bench.length ? [['Bench', my.bench.map(function (m) { return m.name; }).join(', ')]] : []));
+      h += sect('Win chance, your team') + sqgMatrix(mhead, my.matrix, function (i) { return 'Group ' + (i + 1); });
+      h += sect('Win chance, groups as they are now') + sqgMatrix(mhead, my.now, function (i) { return 'Group ' + (i + 1) + ' now'; });
+      var sm = 0, sn = 0;
+      my.matrix.forEach(function (r) { sm += r.p; }); my.now.forEach(function (r) { sn += r.p; });
+      var d = Math.round((sm - sn) / 3 * 100);
+      h += line(d > 0 ? t('Your team: +{0} points of average win chance over the groups as they are now.', [d]) :
+        (d < 0 ? t('Your team: {0} points of average win chance under the groups as they are now.', [d]) : t('Your team: about the same as the groups as they are now.')), d > 0 ? 'good' : (d < 0 ? 'bad' : 'mu'));
+      h += '<textarea id="sqmytxt" readonly rows="' + (my.groups.length + my.matrix.length + 4) + '" style="width:100%;box-sizing:border-box;font:12px monospace;background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:8px;padding:8px">' + esc(sqgText(SQ_MY)) + '</textarea>';
+      h += '<div class="btns"><button class="sec" id="b_sqmycopy">Copy</button></div>';
+    }
+    h += sect('Best groups');
     h += '<div class="btns"><button class="pri" id="b_sqrun"' + (SQ_BUSY ? ' disabled' : '') + '>' + (SQ_BUSY ? 'Working...' : 'Build the best groups') + '</button></div>';
     h += '<div class="line" id="sqmsg">' + esc(SQ_MSG) + '</div>';
     if (SQ_RES) {
@@ -1946,10 +2068,33 @@
       });
     });
     var b = el.querySelector('#b_sqrun'); if (b) b.addEventListener('click', sqgRun);
-    var cp = el.querySelector('#b_sqcopy');
-    if (cp) cp.addEventListener('click', function () {
-      var ta = el.querySelector('#sqtxt'); ta.select();
-      try { navigator.clipboard.writeText(ta.value).then(function () { cp.textContent = 'Copied'; }, function () { document.execCommand('copy'); cp.textContent = 'Copied'; }); } catch (e) { document.execCommand('copy'); cp.textContent = 'Copied'; }
+    el.querySelectorAll('select[data-slot]').forEach(function (c) {
+      c.addEventListener('change', function () {
+        // The places as shown, then this one: whoever held it goes to the
+        // bench, and the member picked leaves the place they had.
+        var v = c.getAttribute('data-slot').split('-').map(Number), u = c.value, set = {};
+        ros.forEach(function (m) { set[m.user] = [0, 1]; });
+        sqgMyGroups().forEach(function (G, gi) { G.forEach(function (m, k) { set[m.user] = [gi + 1, k + 1]; }); });
+        ros.forEach(function (m) { if (set[m.user][0] === v[0] && set[m.user][1] === v[1]) set[m.user] = [0, 1]; });
+        if (u) set[u] = v;
+        SQG.set = set; SQ_MY = null; sqgSave(); renderSq();
+      });
+    });
+    var bm = el.querySelector('#b_sqmy'); if (bm) bm.addEventListener('click', sqgMyRun);
+    var br = el.querySelector('#b_sqreset'); if (br) br.addEventListener('click', function () { SQG.set = null; SQ_MY = null; SQ_MYMSG = ''; sqgSave(); renderSq(); });
+    var bt = el.querySelector('#b_sqtake');
+    if (bt) bt.addEventListener('click', function () {
+      var set = {};
+      ros.forEach(function (m) { set[m.user] = [0, 1]; });
+      SQ_RES.res.groups.forEach(function (G, i) { G.forEach(function (m, k) { set[m.id] = [i + 1, k + 1]; }); });
+      SQG.set = set; SQ_MY = null; sqgSave(); renderSq();
+    });
+    [['#b_sqcopy', '#sqtxt'], ['#b_sqmycopy', '#sqmytxt']].forEach(function (x) {
+      var cp = el.querySelector(x[0]);
+      if (cp) cp.addEventListener('click', function () {
+        var ta = el.querySelector(x[1]); ta.select();
+        try { navigator.clipboard.writeText(ta.value).then(function () { cp.textContent = 'Copied'; }, function () { document.execCommand('copy'); cp.textContent = 'Copied'; }); } catch (e) { document.execCommand('copy'); cp.textContent = 'Copied'; }
+      });
     });
   }
 
