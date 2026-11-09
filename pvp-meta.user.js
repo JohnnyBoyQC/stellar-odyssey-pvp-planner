@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stellar Odyssey – PvP Meta
 // @namespace    stellarodyssey-pvpmeta
-// @version      1.3.5
+// @version      1.3.6
 // @description  Arena build planner for Stellar Odyssey: the meta split at your own total stat, the best free re-spec, which upgrades pay, and a record of your duels. Built from Astrolabe 3.22.9's simulator. Keeps the squadron battles, arena duels and roster you browse, and opens them in the web planner in one click (player and squadron picker). Reads the page only: no network requests, no game actions.
 // @match        *://steam.stellarodyssey.app/*
 // @grant        GM_getValue
@@ -832,7 +832,10 @@
       var recs = Object.keys(seen).map(function (k) { return seen[k]; }).sort(function (x, y) { return x.t - y.t; });
       var t = pv ? pvTotals(pv) : null;
       var x = pxExtract({ squad: squad, roster: roster }, me, recs, t ? { p: t.precision, e: t.evasion } : null);
-      return { app: 'PvP Meta', v: 1, ver: scriptVersion(), realm: REALM, made: Date.now(), root: st ? plRoot(st) : null, duels: recs, x: x };
+      // raw: the battles and rosters themselves, so the page can add them up
+      // with the squadron file and other imports (page 1.4.9 on).
+      return { app: 'PvP Meta', v: 1, ver: scriptVersion(), realm: REALM, made: Date.now(), root: st ? plRoot(st) : null, duels: recs, x: x,
+        raw: { squad: squad.map(function (q) { return { realm: q.realm, saved: q.saved, battle: q.battle }; }), roster: roster.map(function (r) { return { t: r.t, body: r.body }; }) } };
     });
   }
 

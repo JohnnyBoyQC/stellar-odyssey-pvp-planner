@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PvP Build Planner (beta)</title>
-<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.4.8">
+<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.4.9">
 </head>
 <body>
 <script>
 (function () {
   'use strict';
-  var PAGE_VER = "1.4.8";
+  var PAGE_VER = "1.4.9";
   var GRAB_SRC = "(function () {\nif (window.__sopvpGrab) { window.__sopvpGrab.show(); return; }\nvar PL = 'https://johnnyboyqc.github.io/stellar-odyssey-pvp-planner/', OR = 'https://johnnyboyqc.github.io';\nvar G = { squad: {}, roster: null, duels: {}, box: null };\nvar RE = /\\/api\\/squadrons\\/(battlelog|groups)(\\?|$)/;\nfunction abs(u) { try { return new URL(String((u && u.href) || u), location.href).href; } catch (e) { return String(u); } }\nfunction take(url, text) {\nvar b;\ntry { b = JSON.parse(text); } catch (e) { return; }\nif (/battlelog/.test(url)) (b && b.battles || []).forEach(function (x) { if (x && x._id && Array.isArray(x.logs)) G.squad[x._id] = x; });\nelse G.roster = { t: Date.now(), body: text };\ndraw();\n}\nvar XP = XMLHttpRequest.prototype, oO = XP.open, oS = XP.send;\nXP.open = function (m, u) { try { this.__sopvpG = abs(u); } catch (e) {} return oO.apply(this, arguments); };\nXP.send = function () {\nvar x = this;\ntry {\nif (RE.test(x.__sopvpG || '')) x.addEventListener('load', function () {\ntry {\nif (x.status < 200 || x.status >= 300) return;\nvar t = (x.responseType === '' || x.responseType === 'text') ? x.responseText : (x.responseType === 'json' ? JSON.stringify(x.response) : null);\nif (t) take(x.responseURL || x.__sopvpG, t);\n} catch (e) {}\n});\n} catch (e) {}\nreturn oS.apply(this, arguments);\n};\nvar oF = window.fetch;\nif (typeof oF === 'function') window.fetch = function (i) {\nvar p = oF.apply(this, arguments);\ntry {\nvar u = abs(typeof i === 'string' ? i : (i && i.url));\nif (RE.test(u)) p.then(function (r) { if (r.ok) r.clone().text().then(function (t) { take(r.url || u, t); }, function () {}); }, function () {});\n} catch (e) {}\nreturn p;\n};\nfunction state() {\ntry {\nvar el = document.querySelector('#q-app') || document.querySelector('#app'), a = el && el.__vue_app__;\nvar p = a && a.config && a.config.globalProperties && a.config.globalProperties.$pinia;\nreturn p && p.state && p.state.value;\n} catch (e) { return null; }\n}\nfunction copy(o) { try { return JSON.parse(JSON.stringify(o)); } catch (e) { return null; } }\nfunction tick() {\nvar st = state();\nif (!st) return;\ntry {\nvar A = st.PvPArenaStore, d = A && A.currentDuel;\nif (d && d._id && d.logs && d.logs.length && !G.duels[d._id]) { G.duels[d._id] = copy(d); draw(); }\nvar s = st.squadronStore;\nif (!G.roster && s && s.group1 && s.group1.length) { G.roster = { t: Date.now(), body: JSON.stringify({ squad: [{ group1: copy(s.group1), group2: copy(s.group2 || []), group3: copy(s.group3 || []), available: [] }] }) }; draw(); }\n} catch (e) {}\n}\nsetInterval(tick, 1000);\nfunction build(st) {\ntry {\nvar U = st.UserStore, P = U.player, mats = {};\n(P.pvp_gear || []).forEach(function (g) { mats[String(g.statCost || '').toLowerCase()] = 1; });\nvar slots = (st.PetsStore && st.PetsStore.petSlots) || [], inSlot = {};\nslots.forEach(function (x) { if (x && x.pet) inSlot[x.pet] = 1; });\nreturn {\nUserStore: { username: U.username, pvp_badges: U.pvp_badges, player: copy({ pvp_gear: P.pvp_gear, pvpstats: P.pvpstats, clones: P.clones }) },\nCraftStore: { crafting_level: st.CraftStore && st.CraftStore.crafting_level },\nMaterialsStore: { materialsList: ((st.MaterialsStore && st.MaterialsStore.materialsList) || []).filter(function (m) { var n = m && m.item && (m.item.name || m.item); return n && mats[String(n).toLowerCase()]; }).map(function (m) { return { item: { name: m.item.name || m.item }, quantity: m.quantity }; }) },\nPetsStore: { petSlots: slots.filter(function (x) { return x && x.pet; }).map(function (x) { return { pet: x.pet }; }), pets: ((st.PetsStore && st.PetsStore.pets) || []).filter(function (p) { return p && inSlot[p._id] && p.name === 'Velari'; }).map(function (p) { return { _id: p._id, name: p.name, level: p.level }; }) }\n};\n} catch (e) { return null; }\n}\nfunction payload() {\nvar st = state();\nreturn { app: 'PvP Planner button', v: 1, made: Date.now(), me: st && st.UserStore ? st.UserStore.username : null, build: st ? build(st) : null,\nsquad: Object.keys(G.squad).map(function (k) { return { battle: G.squad[k] }; }),\nduel: Object.keys(G.duels).map(function (k) { return { duel: G.duels[k], saved: Date.now() }; }),\nroster: G.roster ? [G.roster] : [] };\n}\nfunction send() {\nvar nonce = String(Math.random()).slice(2), w = window.open(PL + '#wait=' + nonce, '_blank');\nif (!w) { alert(L.p); return; }\nwindow.addEventListener('message', function on(e) {\nif (e.origin !== OR || !e.data || e.data.sopvpReady !== nonce || e.source !== w) return;\nwindow.removeEventListener('message', on);\ne.source.postMessage({ sopvpRaw: payload(), nonce: nonce }, OR);\n});\n}\nvar L = (function () {\nvar n = String((navigator.languages && navigator.languages[0]) || navigator.language || 'en').toLowerCase();\nvar T = {\nes: { b: 'batallas de escuadrón', d: 'duelos de arena', r: 'plantilla', y: 'sí', n: 'todavía no', h: 'Ahora recorre Registro de peleas › Escuadrón (50 por página, todas las páginas), abre Grupos de escuadrón y pulsa Ver pelea en tus duelos de arena. Deja esta pestaña abierta.', s: 'Enviar al planificador ↗', p: 'El navegador bloqueó la pestaña nueva: permite las ventanas emergentes de este sitio y vuelve a pulsar Enviar.' },\nzh: { b: '场舰队战斗', d: '场竞技场决斗', r: '名单', y: '已有', n: '还没有', h: '现在浏览 战斗日志 › 舰队（每页 50 条，每一页都看），打开舰队编组，并在竞技场决斗上点击查看战斗。请保持此标签页打开。', s: '发送到规划器 ↗', p: '浏览器拦截了新标签页：请允许本网站弹出窗口后再点一次发送。' },\nen: { b: 'squadron battles', d: 'arena duels', r: 'roster', y: 'yes', n: 'not yet', h: 'Now browse Battle Log › Squadron (50 per page, every page), open Squadron Groups, and click View battle on your arena duels. Keep this tab open.', s: 'Send to planner ↗', p: 'The browser blocked the new tab: allow pop-ups for this site, then click Send again.' }\n};\nreturn T[n.indexOf('es') === 0 ? 'es' : (n.indexOf('zh') === 0 ? 'zh' : 'en')];\n})();\nfunction draw() {\nif (!G.box) return;\nvar n = Object.keys(G.squad).length, d = Object.keys(G.duels).length;\nG.box.querySelector('.c').textContent = n + ' ' + L.b + ', ' + d + ' ' + L.d + ', ' + L.r + ': ' + (G.roster ? L.y : L.n);\n}\nfunction show() {\nif (G.box) { G.box.style.display = 'block'; return; }\nvar b = document.createElement('div');\nb.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;background:#1a2129;color:#d5dde6;border:1px solid #4fb3e8;border-radius:10px;padding:10px 12px;font:13px sans-serif;max-width:300px;box-shadow:0 4px 16px rgba(0,0,0,.4)';\nb.innerHTML = '<b>PvP Planner<\/b> <span style=\"float:right;cursor:pointer\" class=\"x\">✕<\/span><div class=\"c\" style=\"margin:6px 0\"><\/div>' +\n'<div class=\"h\" style=\"font-size:11px;color:#9aa8b6;margin-bottom:8px\"><\/div>' +\n'<button class=\"s\" style=\"background:#4fb3e8;color:#0d1b24;border:0;border-radius:7px;padding:6px 12px;font-weight:600;cursor:pointer\"><\/button>';\nb.querySelector('.s').textContent = L.s;\nb.querySelector('.h').textContent = L.h;\nb.querySelector('.x').onclick = function () { b.style.display = 'none'; };\nb.querySelector('.s').onclick = send;\ndocument.body.appendChild(b);\nG.box = b; draw();\n}\nwindow.__sopvpGrab = { show: show, data: G };\ntick(); show();\n})();";
 
   /* ============================================================
@@ -181,6 +181,28 @@
       'Group {0}': 'Grupo {0}',
       '(empty)': '(vacío)',
       'Bench': 'Reserva',
+      'this browser cannot lock the file; try Chrome, Edge or a recent Firefox': 'este navegador no puede cerrar el archivo; prueba Chrome, Edge o un Firefox reciente',
+      'Unlocking...': 'Abriendo...',
+      'Squadron data added: {0} new squadron battles, {1} new duels.': 'Datos del escuadrón añadidos: {0} batallas de escuadrón nuevas, {1} duelos nuevos.',
+      'Squadron data unlocked: nothing new for this browser.': 'Datos del escuadrón abiertos: nada nuevo para este navegador.',
+      'Wrong password, or the file is damaged.': 'Contraseña incorrecta, o el archivo está dañado.',
+      'Choose a squad password first.': 'Elige primero una contraseña del escuadrón.',
+      'The two passwords are not the same.': 'Las dos contraseñas no coinciden.',
+      'Use at least 6 characters.': 'Usa al menos 6 caracteres.',
+      'Locking the file...': 'Cerrando el archivo...',
+      'Saved pvp-shared.dat ({0} squadron battles, {1} duels). Put it in the shared folder of the page on GitHub (or send it to the page owner); everyone with the password gets it within a few minutes.': 'Guardado pvp-shared.dat ({0} batallas de escuadrón, {1} duelos). Ponlo en la carpeta shared de la página en GitHub (o envíalo al dueño de la página); todos los que tengan la contraseña lo reciben en pocos minutos.',
+      'Could not make the file: {0}': 'No se pudo crear el archivo: {0}',
+      'Squadron data for everyone': 'Datos del escuadrón para todos',
+      'Published {0} by {1}: {2} squadron battles, {3} duels.': 'Publicado {0} por {1}: {2} batallas de escuadrón, {3} duelos.',
+      'squad password': 'contraseña del escuadrón',
+      'Unlock': 'Abrir',
+      'Ask your squadron for the password. It is kept on this device so the data unlocks by itself next time.': 'Pide la contraseña a tu escuadrón. Se guarda en este dispositivo para que los datos se abran solos la próxima vez.',
+      'No squadron data published yet.': 'Aún no hay datos del escuadrón publicados.',
+      'Publish for my squadron': 'Publicar para mi escuadrón',
+      'Makes one locked file with every squadron battle, roster and arena duel saved in this browser (not your API key, not your materials). Everyone who opens the page and knows the password then gets them. Pick a password only your squadron knows; anyone with it can read every build in the file.': 'Crea un archivo cerrado con todas las batallas de escuadrón, plantillas y duelos de arena guardados en este navegador (sin tu clave API ni tus materiales). Todos los que abran la página y conozcan la contraseña los reciben. Elige una contraseña que solo conozca tu escuadrón; quien la tenga puede leer todos los builds del archivo.',
+      'again': 'repetir',
+      'Make the file': 'Crear el archivo',
+      'Includes the squadron data for everyone.': 'Incluye los datos del escuadrón para todos.',
       'In brackets: the chance when your group attacks / when it defends. They can be far apart, so look at the one that matches the fight.': 'Entre paréntesis: la probabilidad cuando tu grupo ataca / cuando defiende. Pueden ser muy distintas, así que mira la que corresponde a la pelea.',
       'Saved. Post the file in your squadron chat: anyone can load it here with Load file, no script needed. It holds the player cards, the enemy groups and your squadron roster: every squadmate\'s exact PvP points, gear, skills and clones (yours too if you are in the roster). Share it only inside your squadron.': 'Guardado. Publica el archivo en el chat de tu escuadrón: cualquiera puede cargarlo aquí con Cargar archivo, sin script. Contiene las fichas de jugadores, los grupos enemigos y la plantilla de tu escuadrón: los puntos PvP, equipo, habilidades y clones exactos de cada compañero (también los tuyos si estás en la plantilla). Compártelo solo dentro de tu escuadrón.',
       'Could not save in this browser (storage full or blocked): the data is used for this visit only. Use Download saved data to keep it.': 'No se pudo guardar en este navegador (almacenamiento lleno o bloqueado): los datos se usan solo en esta visita. Usa Descargar datos guardados para conservarlos.',
@@ -484,6 +506,28 @@
       'Group {0}': '小队 {0}',
       '(empty)': '（空）',
       'Bench': '替补',
+      'this browser cannot lock the file; try Chrome, Edge or a recent Firefox': '此浏览器无法加密文件；请使用 Chrome、Edge 或较新的 Firefox',
+      'Unlocking...': '正在解锁...',
+      'Squadron data added: {0} new squadron battles, {1} new duels.': '已加入舰队数据：新增 {0} 场舰队战斗、{1} 场对决。',
+      'Squadron data unlocked: nothing new for this browser.': '舰队数据已解锁：此浏览器没有新内容。',
+      'Wrong password, or the file is damaged.': '密码错误，或文件已损坏。',
+      'Choose a squad password first.': '请先设置舰队密码。',
+      'The two passwords are not the same.': '两次输入的密码不一致。',
+      'Use at least 6 characters.': '至少使用 6 个字符。',
+      'Locking the file...': '正在加密文件...',
+      'Saved pvp-shared.dat ({0} squadron battles, {1} duels). Put it in the shared folder of the page on GitHub (or send it to the page owner); everyone with the password gets it within a few minutes.': '已保存 pvp-shared.dat（{0} 场舰队战斗、{1} 场对决）。把它放到 GitHub 上页面的 shared 文件夹中（或发给页面所有者）；知道密码的人几分钟内都能获得。',
+      'Could not make the file: {0}': '无法生成文件：{0}',
+      'Squadron data for everyone': '供所有人使用的舰队数据',
+      'Published {0} by {1}: {2} squadron battles, {3} duels.': '{0}由 {1} 发布：{2} 场舰队战斗、{3} 场对决。',
+      'squad password': '舰队密码',
+      'Unlock': '解锁',
+      'Ask your squadron for the password. It is kept on this device so the data unlocks by itself next time.': '向你的舰队索取密码。密码会保存在此设备上，下次数据会自动解锁。',
+      'No squadron data published yet.': '还没有发布舰队数据。',
+      'Publish for my squadron': '为我的舰队发布',
+      'Makes one locked file with every squadron battle, roster and arena duel saved in this browser (not your API key, not your materials). Everyone who opens the page and knows the password then gets them. Pick a password only your squadron knows; anyone with it can read every build in the file.': '生成一个加密文件，包含此浏览器中保存的所有舰队战斗、名单和竞技场对决（不含你的 API 密钥和材料）。打开页面并知道密码的人都能获得这些数据。请选择只有你的舰队知道的密码；知道密码的人可以读取文件中的所有配置。',
+      'again': '再次输入',
+      'Make the file': '生成文件',
+      'Includes the squadron data for everyone.': '包含供所有人使用的舰队数据。',
       'In brackets: the chance when your group attacks / when it defends. They can be far apart, so look at the one that matches the fight.': '括号内：你的小队进攻时 / 防守时的胜率。两者可能相差很大，请看与这场战斗对应的那个。',
       'Saved. Post the file in your squadron chat: anyone can load it here with Load file, no script needed. It holds the player cards, the enemy groups and your squadron roster: every squadmate\'s exact PvP points, gear, skills and clones (yours too if you are in the roster). Share it only inside your squadron.': '已保存。把文件发到你的舰队聊天中：任何人都可以在这里用“载入文件”载入，无需脚本。它包含玩家卡片、敌方小队和你的舰队名单：每名队友精确的 PvP 点数、装备、技能和克隆体（如果你在名单中，也包括你的）。只在你的舰队内部分享。',
       'Could not save in this browser (storage full or blocked): the data is used for this visit only. Use Download saved data to keep it.': '无法保存到此浏览器（存储已满或被阻止）：数据只在本次访问中使用。请用“下载已保存的数据”保留它。',
@@ -1888,7 +1932,7 @@
   // One saved store per realm, so players with the same name on two realms
   // are never mixed. Steam keeps the original key.
   function archKey() { var r = (S.inputs && S.inputs.realm) || 'steam'; return r === 'steam' ? 'arch' : 'arch:' + r; }
-  function archEmpty() { return { squad: [], duel: [], roster: [], build: null, me: null, first: Date.now(), last: 0 }; }
+  function archEmpty() { return { squad: [], duel: [], recs: [], roster: [], build: null, me: null, first: Date.now(), last: 0 }; }
   function archDb() {
     return new Promise(function (ok, no) {
       if (typeof indexedDB === 'undefined') { no(new Error('no IndexedDB')); return; }
@@ -1936,6 +1980,18 @@
       if (!d || seen['d' + k]) return;
       seen['d' + k] = 1; ARCH.duel.push({ saved: x.saved || Date.now(), duel: d, me: x.me || null }); nd++;
     });
+    // Duel records already read (the script's, or a squadmate's from the
+    // squadron file), each with whose duel it was (who).
+    if (!ARCH.recs) ARCH.recs = [];
+    var rk = {};
+    ARCH.recs.forEach(function (r) { rk[arKey(r)] = 1; });
+    (a.recs || []).forEach(function (r) {
+      if (!r || !r.o || !r.e) return;
+      var k = arKey(r);
+      if (rk[k]) return;
+      rk[k] = 1; ARCH.recs.push(r); nd++;
+    });
+    if (ARCH.recs.length > ARCH_MAX_D) ARCH.recs = ARCH.recs.sort(function (x, y) { return (x.t || 0) - (y.t || 0); }).slice(-ARCH_MAX_D);
     (a.roster || []).forEach(function (r) {
       if (r && r.body && !ARCH.roster.some(function (o) { return o.t === r.t && o.body === r.body; })) ARCH.roster.push({ t: r.t || Date.now(), body: r.body });
     });
@@ -1950,7 +2006,7 @@
     ARCH.last = Date.now();
     return { b: nb, d: nd };
   }
-  function archCount() { return ARCH ? { b: ARCH.squad.length, d: ARCH.duel.length, r: ARCH.roster.length } : { b: 0, d: 0, r: 0 }; }
+  function archCount() { return ARCH ? { b: ARCH.squad.length, d: ARCH.duel.length + (ARCH.recs ? ARCH.recs.length : 0), r: ARCH.roster.length } : { b: 0, d: 0, r: 0 }; }
   function archDownload() {
     if (!ARCH || !(ARCH.squad.length || ARCH.duel.length || ARCH.roster.length)) { impMsg(t('Nothing saved yet.'), 'warn'); return; }
     var out = { app: 'PvP Meta battle archive', version: 'planner ' + PAGE_VER, exported: new Date().toISOString(), me: ARCH.me, build: ARCH.build, squad: ARCH.squad, duel: ARCH.duel, roster: ARCH.roster };
@@ -1990,6 +2046,22 @@
   }
 
   // What came from the userscript.
+  // From PvP Meta 1.3.6 on, the script also sends its raw battles and
+  // rosters: they go into the saved store, so they add up with the
+  // squadron file and the other imports.
+  function impLink(obj, done) {
+    if (!obj || !obj.raw || !Array.isArray(obj.raw.squad)) { impTake(obj, 'link'); if (done) done(); return; }
+    archLoad().then(function () {
+      try {
+        var me = obj.x && obj.x.me;
+        (obj.duels || []).forEach(function (r) { if (r && !r.who) r.who = me; });
+        archMerge({ squad: obj.raw.squad, roster: obj.raw.roster || [], recs: obj.duels || [], build: obj.root || null, me: me });
+        archPut().then(function (ok) { if (!ok) impMsg(t('Could not save in this browser (storage full or blocked): the data is used for this visit only. Use Download saved data to keep it.'), 'bad'); });
+        impExtract(ARCH, 'link', obj.root ? t('from PvP Meta, {0}', [ago(obj.made || Date.now())]) : null, null);
+      } catch (e) { impTake(obj, 'link'); }
+      if (done) done();
+    });
+  }
   function impTake(obj, src) {
     if (!obj || !obj.x || !Array.isArray(obj.x.players)) throw new Error('this is not PvP Meta data');
     IMP = { x: obj.x, duels: Array.isArray(obj.duels) ? obj.duels : [], root: obj.root || null, made: obj.made || Date.now(), ver: obj.ver || '?', realm: obj.realm || 'steam', src: src };
@@ -2038,11 +2110,22 @@
           if (r.e) { if (r.e.p > 0) r.e.p = r.e.p * x.me.e / r.o.e; if (r.e.e > 0) r.e.e = r.e.e * x.me.p / r.o.p; }
           r.o.p = x.me.p; r.o.e = x.me.e;
         }
+        r.who = me;
         recs.push(r);
       }
     });
+    // Records from the script or the squadron file: all of them feed the
+    // player cards; ours also count as "my duels".
+    var all = recs.slice(), seen = {};
+    recs.forEach(function (r) { seen[arKey(r)] = 1; });
+    (a.recs || []).forEach(function (r) {
+      var k = arKey(r);
+      if (seen[k]) return;
+      seen[k] = 1; all.push(r);
+      if (r.who && r.who === me) recs.push(r);
+    });
     var tt = pv ? pvTotals(pv) : null;
-    var x = pxExtract({ squad: a.squad || [], roster: a.roster || [] }, me, recs, tt ? { p: tt.precision, e: tt.evasion } : null);
+    var x = pxExtract({ squad: a.squad || [], roster: a.roster || [] }, me, all, tt ? { p: tt.precision, e: tt.evasion } : null);
     impTake({ x: x, duels: recs, root: a.build || null, made: Date.parse(exported) || a.last || Date.now(), ver: a.version || '?', realm: 'steam' }, src);
     return { b: (a.squad || []).length, d: (a.duel || []).length };
   }
@@ -2093,7 +2176,7 @@
     x.players.forEach(function (p) { if (p.sq) sq[p.sq] = 1; });
     el.innerHTML = '<div class="tiles">' + tile(t('Players'), String(x.players.length), t('{0} squadrons', [Object.keys(sq).length])) + tile(t('Squadron battles'), String(x.battles ? x.battles.length : 0), x.own ? t('yours: {0}', [x.own]) : '') +
       tile(t('Arena duels'), String(IMP.duels.length), t('{0} with names', [IMP.duels.filter(function (r) { return r.nm; }).length])) + '</div>' +
-      line((IMP.src === 'share' ? t('Imported {0} from a share file by {1}.', [ago(IMP.made), x.me || t('a squadmate')]) : IMP.src === 'file' ? t('Imported {0} from the archive file.', [ago(IMP.made)]) : IMP.src === 'button' ? t('Imported {0} with the PvP Planner button.', [ago(IMP.made)]) : IMP.src === 'saved' ? t('Imported {0} from what is saved in this browser.', [ago(IMP.made)]) : t('Imported {0} from PvP Meta.', [ago(IMP.made)])) + ' ' + (archCount().b || archCount().d ? t('Saved in this browser: {0} squadron battles, {1} duels; every new load adds to it.', [archCount().b, archCount().d]) : t('Kept in this browser only.')) + (x.roster ? '' : ' ' + t('No Squadron Groups roster in it yet: open Squadron Groups once in the game so your own members\' precision and evasion are known, which sharpens every estimate.')), x.roster ? 'mu' : 'warn') +
+      line((IMP.src === 'share' ? t('Imported {0} from a share file by {1}.', [ago(IMP.made), x.me || t('a squadmate')]) : IMP.src === 'file' ? t('Imported {0} from the archive file.', [ago(IMP.made)]) : IMP.src === 'button' ? t('Imported {0} with the PvP Planner button.', [ago(IMP.made)]) : IMP.src === 'saved' ? t('Imported {0} from what is saved in this browser.', [ago(IMP.made)]) : IMP.src === 'squad' ? t('Includes the squadron data for everyone.') : t('Imported {0} from PvP Meta.', [ago(IMP.made)])) + ' ' + (archCount().b || archCount().d ? t('Saved in this browser: {0} squadron battles, {1} duels; every new load adds to it.', [archCount().b, archCount().d]) : t('Kept in this browser only.')) + (x.roster ? '' : ' ' + t('No Squadron Groups roster in it yet: open Squadron Groups once in the game so your own members\' precision and evasion are known, which sharpens every estimate.')), x.roster ? 'mu' : 'warn') +
       (warn ? line(warn, 'warn') : '');
   }
 
@@ -2105,7 +2188,7 @@
     try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
     if (m) {
       impMsg('Unpacking the data from PvP Meta...');
-      impDecode(m[1]).then(function (obj) { impTake(obj, 'link'); impMsg('Imported from PvP Meta.', 'good'); },
+      impDecode(m[1]).then(function (obj) { impLink(obj, function () { impMsg(t('Imported from PvP Meta.'), 'good'); }); },
         function (e) { impMsg(t('Could not read the data in the link: {0}', [(e && e.message) || e]), 'bad'); });
       return;
     }
@@ -2125,7 +2208,7 @@
             } catch (er) { impMsg(t('Could not read the data: {0}', [er.message]), 'bad'); }
           });
         }
-        else { impTake(d.sopvpData, 'link'); impMsg(t('Imported from PvP Meta.'), 'good'); }
+        else impLink(d.sopvpData, function () { impMsg(t('Imported from PvP Meta.'), 'good'); });
       } catch (er) { impMsg(t('Could not read the data: {0}', [er.message]), 'bad'); }
     });
     impMsg('Waiting for the data from the game tab...');
@@ -2296,6 +2379,136 @@
       VS.q = qi.value; var pos = qi.selectionStart; renderVs();
       var n = root.querySelector('#f_vsq'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} }
     });
+  }
+
+  /* ============================================================
+     SQUADRON DATA FOR EVERYONE (1.4.9)
+
+     One file next to the page, shared/pvp-shared.dat, holds the squadron
+     battles, rosters and arena duel records someone published. Everyone who
+     opens the page gets it, locked with the squad password: it is
+     compressed and encrypted in the browser (PBKDF2-SHA256 200,000 rounds,
+     AES-GCM 256), so the file on GitHub is unreadable without the password.
+     Unlocked, it is added to the saved store like any import. Publishing
+     makes the file; the page's owner uploads it to the repository.
+     Nothing here goes to the game.
+     ============================================================ */
+
+  var SH_URL = 'shared/pvp-shared.dat', SH_ITER = 200000;
+  var SH = { file: null, state: 'none', msg: '', info: null };   // state: none | locked | open | bad
+
+  function shB64(bytes) {
+    var s = '', CH = 0x8000;
+    for (var i = 0; i < bytes.length; i += CH) s += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+    return btoa(s);
+  }
+  function shUnB64(s) {
+    var bin = atob(s), out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  function shStream(bytes, T) {
+    var cs = new T('deflate-raw'), w = cs.writable.getWriter();
+    w.write(bytes).catch(function () {}); w.close().catch(function () {});
+    return new Response(cs.readable).arrayBuffer().then(function (b) { return new Uint8Array(b); });
+  }
+  function shKey(pass, salt) {
+    var c = crypto.subtle;
+    return c.importKey('raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveKey']).then(function (k) {
+      return c.deriveKey({ name: 'PBKDF2', salt: salt, iterations: SH_ITER, hash: 'SHA-256' }, k, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+    });
+  }
+  // The package: battles, rosters, duel records (whose duel each is), and a
+  // summary that is readable without the password (counts and date only).
+  function shPack(pass) {
+    if (typeof CompressionStream !== 'function' || !window.crypto || !crypto.subtle) return Promise.reject(new Error(t('this browser cannot lock the file; try Chrome, Edge or a recent Firefox')));
+    var me = (IMP && IMP.x && IMP.x.me) || (ARCH && ARCH.me) || null;
+    var recs = (ARCH && ARCH.recs ? ARCH.recs.slice() : []);
+    if (IMP) IMP.duels.forEach(function (r) { if (!recs.some(function (x) { return arKey(x) === arKey(r); })) recs.push(Object.assign({}, r, { who: r.who || me })); });
+    var body = { app: 'PvP Planner squadron data', v: 1, made: Date.now(), by: me, squad: ARCH ? ARCH.squad : [], roster: ARCH ? ARCH.roster.slice(-5) : [], recs: recs };
+    var salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+    return shStream(new TextEncoder().encode(JSON.stringify(body)), CompressionStream).then(function (z) {
+      return shKey(pass, salt).then(function (k) { return crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, k, z); });
+    }).then(function (enc) {
+      return { app: 'PvP Planner squadron data', v: 1, made: body.made, by: me, n: { b: body.squad.length, d: recs.length, r: body.roster.length },
+        kdf: 'PBKDF2-SHA256', iter: SH_ITER, salt: shB64(salt), iv: shB64(iv), data: shB64(new Uint8Array(enc)) };
+    });
+  }
+  function shOpen(file, pass) {
+    return shKey(pass, shUnB64(file.salt)).then(function (k) {
+      return crypto.subtle.decrypt({ name: 'AES-GCM', iv: shUnB64(file.iv) }, k, shUnB64(file.data));
+    }).then(function (z) { return shStream(new Uint8Array(z), DecompressionStream); }).then(function (b) {
+      return JSON.parse(new TextDecoder().decode(b));
+    });
+  }
+  function shPass() { try { return localStorage.getItem('sopvpweb:sqpass') || ''; } catch (e) { return ''; } }
+  function shSetPass(p) { try { if (p) localStorage.setItem('sopvpweb:sqpass', p); else localStorage.removeItem('sopvpweb:sqpass'); } catch (e) {} }
+
+  function shStart() {
+    fetch(SH_URL, { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }).then(function (f) {
+      if (!f || f.app !== 'PvP Planner squadron data' || !f.data) { SH.state = 'none'; shRender(); return; }
+      SH.file = f; SH.state = 'locked';
+      var p = shPass();
+      if (p) shUnlock(p, true); else shRender();
+    });
+  }
+  function shUnlock(pass, quiet) {
+    if (!SH.file) return;
+    SH.msg = t('Unlocking...'); shRender();
+    shOpen(SH.file, pass).then(function (body) {
+      shSetPass(pass);
+      return archLoad().then(function () {
+        var add = archMerge({ squad: body.squad || [], roster: body.roster || [], recs: body.recs || [] });
+        archPut();
+        impExtract(ARCH, 'squad', null, null);
+        SH.state = 'open'; SH.info = { b: add.b, d: add.d };
+        SH.msg = add.b || add.d ? t('Squadron data added: {0} new squadron battles, {1} new duels.', [add.b, add.d]) : t('Squadron data unlocked: nothing new for this browser.');
+        shRender();
+      });
+    }).catch(function () {
+      shSetPass('');
+      SH.state = 'bad'; SH.msg = quiet ? '' : t('Wrong password, or the file is damaged.');
+      shRender();
+    });
+  }
+  function shPublish() {
+    var a = root.querySelector('#f_shp1'), b = root.querySelector('#f_shp2');
+    if (!a || !a.value) { SH.msg = t('Choose a squad password first.'); shRender(); return; }
+    if (a.value !== b.value) { SH.msg = t('The two passwords are not the same.'); shRender(); return; }
+    if (a.value.length < 6) { SH.msg = t('Use at least 6 characters.'); shRender(); return; }
+    var pass = a.value;
+    SH.msg = t('Locking the file...'); shRender();
+    archLoad().then(function () { return shPack(pass); }).then(function (f) {
+      var url = URL.createObjectURL(new Blob([JSON.stringify(f)], { type: 'application/octet-stream' })), el = document.createElement('a');
+      el.href = url; el.download = 'pvp-shared.dat';
+      document.body.appendChild(el); el.click(); el.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+      shSetPass(pass);
+      SH.msg = t('Saved pvp-shared.dat ({0} squadron battles, {1} duels). Put it in the shared folder of the page on GitHub (or send it to the page owner); everyone with the password gets it within a few minutes.', [f.n.b, f.n.d]);
+      shRender();
+    }).catch(function (e) { SH.msg = t('Could not make the file: {0}', [(e && e.message) || e]); shRender(); });
+  }
+
+  function shRender() {
+    var el = root.querySelector('#shbox');
+    if (!el) return;
+    var h = '<details id="shdet" style="margin-top:10px"' + (SH.state === 'locked' || SH.state === 'bad' ? ' open' : '') + '><summary style="cursor:pointer;font-weight:600">' + esc(t('Squadron data for everyone')) + '</summary>';
+    if (SH.file) {
+      h += line(t('Published {0} by {1}: {2} squadron battles, {3} duels.', [ago(SH.file.made), SH.file.by || '?', SH.file.n ? SH.file.n.b : '?', SH.file.n ? SH.file.n.d : '?']), SH.state === 'open' ? 'good' : 'mu');
+      if (SH.state !== 'open') {
+        h += '<div class="btns"><input type="password" id="f_shpass" placeholder="' + esc(t('squad password')) + '" autocomplete="off" style="max-width:220px"><button class="pri" id="b_shopen">' + esc(t('Unlock')) + '</button></div>';
+        h += line(t('Ask your squadron for the password. It is kept on this device so the data unlocks by itself next time.'), 'mu');
+      }
+    } else h += line(t('No squadron data published yet.'), 'mu');
+    h += '<details style="margin-top:8px"><summary style="cursor:pointer">' + esc(t('Publish for my squadron')) + '</summary>' +
+      line(t('Makes one locked file with every squadron battle, roster and arena duel saved in this browser (not your API key, not your materials). Everyone who opens the page and knows the password then gets them. Pick a password only your squadron knows; anyone with it can read every build in the file.'), 'mu') +
+      '<div class="btns"><input type="password" id="f_shp1" placeholder="' + esc(t('squad password')) + '" autocomplete="new-password" style="max-width:200px"><input type="password" id="f_shp2" placeholder="' + esc(t('again')) + '" autocomplete="new-password" style="max-width:200px"><button class="sec" id="b_shpub">' + esc(t('Make the file')) + '</button></div></details>';
+    if (SH.msg) h += line(SH.msg, SH.state === 'bad' ? 'bad' : '');
+    h += '</details>';
+    el.innerHTML = h;
+    var o = el.querySelector('#b_shopen'); if (o) o.addEventListener('click', function () { var v = el.querySelector('#f_shpass').value; if (v) shUnlock(v, false); });
+    var pi = el.querySelector('#f_shpass'); if (pi) pi.addEventListener('keydown', function (e) { if (e.key === 'Enter' && pi.value) shUnlock(pi.value, false); });
+    var pb = el.querySelector('#b_shpub'); if (pb) pb.addEventListener('click', shPublish);
   }
 
   /* ============================================================
@@ -3705,6 +3918,7 @@
     '</div>' +
     '<div class="box" style="margin-top:16px"><h4 style="margin-top:0">' + esc(t('Your duels and squadron battles')) + '</h4><div id="impstat"></div>' +
     '<div class="btns"><label class="sec filebtn">' + esc(t('Load file (.json)')) + '<input type="file" id="f_arcfile" accept=".json,application/json"></label><button class="sec" id="b_impshare">' + esc(t('Save a share file')) + '</button><button class="sec" id="b_archdl">' + esc(t('Download saved data')) + '</button><button class="sec" id="b_impclr">' + esc(t('Forget imported data')) + '</button></div>' +
+    '<div id="shbox"></div>' +
     '<details id="grabbox" style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">' + esc(t('No script? Use the PvP Planner button')) + '</summary>' +
     B('It brings your own squadron battles and arena duels here without installing anything. Like the script, it only reads what the game shows you: it sends nothing to the game and clicks nothing. It works in a web browser such as Chrome, Edge or Firefox (not inside the Steam app).') +
     '<ol>' +
@@ -3837,8 +4051,9 @@
   // Rebuilt from the saved store when the last import was too big for
   // page storage, or was made from the store anyway.
   archLoad().then(function () {
-    if (archCount().b + archCount().d === 0) { impStatus(); return; }
-    if (!IMP || IMP.src === 'button' || IMP.src === 'file' || IMP.src === 'saved') { try { impExtract(ARCH, 'saved', null, null); } catch (e) {} }
+    if (archCount().b + archCount().d === 0) { impStatus(); shStart(); return; }
+    if (!IMP || IMP.src === 'button' || IMP.src === 'file' || IMP.src === 'saved' || IMP.src === 'link' || IMP.src === 'squad') { try { impExtract(ARCH, 'saved', null, null); } catch (e) {} }
+    shStart();
     impStatus();
   });
   if (IMP && IMP.root) use(IMP.root, t('from PvP Meta, {0}', [ago(IMP.made)]));
