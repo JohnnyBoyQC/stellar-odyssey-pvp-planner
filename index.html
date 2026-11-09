@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PvP Build Planner (beta)</title>
-<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.5.0">
+<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.6.0">
 </head>
 <body>
 <script>
 (function () {
   'use strict';
-  var PAGE_VER = "1.5.0";
+  var PAGE_VER = "1.6.0";
   var GRAB_SRC = "(function () {\nif (window.__sopvpGrab) { window.__sopvpGrab.show(); return; }\nvar PL = 'https://johnnyboyqc.github.io/stellar-odyssey-pvp-planner/', OR = 'https://johnnyboyqc.github.io';\nvar G = { squad: {}, roster: null, duels: {}, box: null };\nvar RE = /\\/api\\/squadrons\\/(battlelog|groups)(\\?|$)/;\nfunction abs(u) { try { return new URL(String((u && u.href) || u), location.href).href; } catch (e) { return String(u); } }\nfunction take(url, text) {\nvar b;\ntry { b = JSON.parse(text); } catch (e) { return; }\nif (/battlelog/.test(url)) (b && b.battles || []).forEach(function (x) { if (x && x._id && Array.isArray(x.logs)) G.squad[x._id] = x; });\nelse G.roster = { t: Date.now(), body: text };\ndraw();\n}\nvar XP = XMLHttpRequest.prototype, oO = XP.open, oS = XP.send;\nXP.open = function (m, u) { try { this.__sopvpG = abs(u); } catch (e) {} return oO.apply(this, arguments); };\nXP.send = function () {\nvar x = this;\ntry {\nif (RE.test(x.__sopvpG || '')) x.addEventListener('load', function () {\ntry {\nif (x.status < 200 || x.status >= 300) return;\nvar t = (x.responseType === '' || x.responseType === 'text') ? x.responseText : (x.responseType === 'json' ? JSON.stringify(x.response) : null);\nif (t) take(x.responseURL || x.__sopvpG, t);\n} catch (e) {}\n});\n} catch (e) {}\nreturn oS.apply(this, arguments);\n};\nvar oF = window.fetch;\nif (typeof oF === 'function') window.fetch = function (i) {\nvar p = oF.apply(this, arguments);\ntry {\nvar u = abs(typeof i === 'string' ? i : (i && i.url));\nif (RE.test(u)) p.then(function (r) { if (r.ok) r.clone().text().then(function (t) { take(r.url || u, t); }, function () {}); }, function () {});\n} catch (e) {}\nreturn p;\n};\nfunction state() {\ntry {\nvar el = document.querySelector('#q-app') || document.querySelector('#app'), a = el && el.__vue_app__;\nvar p = a && a.config && a.config.globalProperties && a.config.globalProperties.$pinia;\nreturn p && p.state && p.state.value;\n} catch (e) { return null; }\n}\nfunction copy(o) { try { return JSON.parse(JSON.stringify(o)); } catch (e) { return null; } }\nfunction tick() {\nvar st = state();\nif (!st) return;\ntry {\nvar A = st.PvPArenaStore, d = A && A.currentDuel;\nif (d && d._id && d.logs && d.logs.length && !G.duels[d._id]) { G.duels[d._id] = copy(d); draw(); }\nvar s = st.squadronStore;\nif (!G.roster && s && s.group1 && s.group1.length) { G.roster = { t: Date.now(), body: JSON.stringify({ squad: [{ group1: copy(s.group1), group2: copy(s.group2 || []), group3: copy(s.group3 || []), available: [] }] }) }; draw(); }\n} catch (e) {}\n}\nsetInterval(tick, 1000);\nfunction build(st) {\ntry {\nvar U = st.UserStore, P = U.player, mats = {};\n(P.pvp_gear || []).forEach(function (g) { mats[String(g.statCost || '').toLowerCase()] = 1; });\nvar slots = (st.PetsStore && st.PetsStore.petSlots) || [], inSlot = {};\nslots.forEach(function (x) { if (x && x.pet) inSlot[x.pet] = 1; });\nreturn {\nUserStore: { username: U.username, pvp_badges: U.pvp_badges, player: copy({ pvp_gear: P.pvp_gear, pvpstats: P.pvpstats, clones: P.clones }) },\nCraftStore: { crafting_level: st.CraftStore && st.CraftStore.crafting_level },\nMaterialsStore: { materialsList: ((st.MaterialsStore && st.MaterialsStore.materialsList) || []).filter(function (m) { var n = m && m.item && (m.item.name || m.item); return n && mats[String(n).toLowerCase()]; }).map(function (m) { return { item: { name: m.item.name || m.item }, quantity: m.quantity }; }) },\nPetsStore: { petSlots: slots.filter(function (x) { return x && x.pet; }).map(function (x) { return { pet: x.pet }; }), pets: ((st.PetsStore && st.PetsStore.pets) || []).filter(function (p) { return p && inSlot[p._id] && p.name === 'Velari'; }).map(function (p) { return { _id: p._id, name: p.name, level: p.level }; }) }\n};\n} catch (e) { return null; }\n}\nfunction payload() {\nvar st = state();\nreturn { app: 'PvP Planner button', v: 1, made: Date.now(), me: st && st.UserStore ? st.UserStore.username : null, build: st ? build(st) : null,\nsquad: Object.keys(G.squad).map(function (k) { return { battle: G.squad[k] }; }),\nduel: Object.keys(G.duels).map(function (k) { return { duel: G.duels[k], saved: Date.now() }; }),\nroster: G.roster ? [G.roster] : [] };\n}\nfunction send() {\nvar nonce = String(Math.random()).slice(2), w = window.open(PL + '#wait=' + nonce, '_blank');\nif (!w) { alert(L.p); return; }\nwindow.addEventListener('message', function on(e) {\nif (e.origin !== OR || !e.data || e.data.sopvpReady !== nonce || e.source !== w) return;\nwindow.removeEventListener('message', on);\ne.source.postMessage({ sopvpRaw: payload(), nonce: nonce }, OR);\n});\n}\nvar L = (function () {\nvar n = String((navigator.languages && navigator.languages[0]) || navigator.language || 'en').toLowerCase();\nvar T = {\nes: { b: 'batallas de escuadrón', d: 'duelos de arena', r: 'plantilla', y: 'sí', n: 'todavía no', h: 'Ahora recorre Registro de peleas › Escuadrón (50 por página, todas las páginas), abre Grupos de escuadrón y pulsa Ver pelea en tus duelos de arena. Deja esta pestaña abierta.', s: 'Enviar al planificador ↗', p: 'El navegador bloqueó la pestaña nueva: permite las ventanas emergentes de este sitio y vuelve a pulsar Enviar.' },\nzh: { b: '场舰队战斗', d: '场竞技场决斗', r: '名单', y: '已有', n: '还没有', h: '现在浏览 战斗日志 › 舰队（每页 50 条，每一页都看），打开舰队编组，并在竞技场决斗上点击查看战斗。请保持此标签页打开。', s: '发送到规划器 ↗', p: '浏览器拦截了新标签页：请允许本网站弹出窗口后再点一次发送。' },\nen: { b: 'squadron battles', d: 'arena duels', r: 'roster', y: 'yes', n: 'not yet', h: 'Now browse Battle Log › Squadron (50 per page, every page), open Squadron Groups, and click View battle on your arena duels. Keep this tab open.', s: 'Send to planner ↗', p: 'The browser blocked the new tab: allow pop-ups for this site, then click Send again.' }\n};\nreturn T[n.indexOf('es') === 0 ? 'es' : (n.indexOf('zh') === 0 ? 'zh' : 'en')];\n})();\nfunction draw() {\nif (!G.box) return;\nvar n = Object.keys(G.squad).length, d = Object.keys(G.duels).length;\nG.box.querySelector('.c').textContent = n + ' ' + L.b + ', ' + d + ' ' + L.d + ', ' + L.r + ': ' + (G.roster ? L.y : L.n);\n}\nfunction show() {\nif (G.box) { G.box.style.display = 'block'; return; }\nvar b = document.createElement('div');\nb.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;background:#1a2129;color:#d5dde6;border:1px solid #4fb3e8;border-radius:10px;padding:10px 12px;font:13px sans-serif;max-width:300px;box-shadow:0 4px 16px rgba(0,0,0,.4)';\nb.innerHTML = '<b>PvP Planner<\/b> <span style=\"float:right;cursor:pointer\" class=\"x\">✕<\/span><div class=\"c\" style=\"margin:6px 0\"><\/div>' +\n'<div class=\"h\" style=\"font-size:11px;color:#9aa8b6;margin-bottom:8px\"><\/div>' +\n'<button class=\"s\" style=\"background:#4fb3e8;color:#0d1b24;border:0;border-radius:7px;padding:6px 12px;font-weight:600;cursor:pointer\"><\/button>';\nb.querySelector('.s').textContent = L.s;\nb.querySelector('.h').textContent = L.h;\nb.querySelector('.x').onclick = function () { b.style.display = 'none'; };\nb.querySelector('.s').onclick = send;\ndocument.body.appendChild(b);\nG.box = b; draw();\n}\nwindow.__sopvpGrab = { show: show, data: G };\ntick(); show();\n})();";
 
   /* ============================================================
@@ -181,6 +181,39 @@
       'Group {0}': 'Grupo {0}',
       '(empty)': '(vacío)',
       'Bench': 'Reserva',
+      'Sections': 'Secciones',
+      'My build': 'Mi build',
+      'Squadron Groups': 'Grupos de escuadrón',
+      'Import fights': 'Importar peleas',
+      'PvP Badges to keep': 'Insignias PvP a conservar',
+      'This page plans your PvP build and your squadron groups. First bring in your fights, in one of these ways:': 'Esta página planifica tu build PvP y los grupos de tu escuadrón. Primero trae tus peleas, de una de estas formas:',
+      '<b>Without installing anything:</b> use the <b>PvP Planner button</b> (below). It works the same way, for one visit.': '<b>Sin instalar nada:</b> usa el <b>botón PvP Planner</b> (abajo). Funciona igual, durante una visita.',
+      '<b>Your build only:</b> in the game open Profile › Game API, copy your key, paste it below and click <b>Load my build</b>. The plan is then against typical players at your strength.': '<b>Solo tu build:</b> en el juego abre Perfil › API del juego, copia tu clave, pégala abajo y pulsa <b>Cargar mi build</b>. El plan se hace entonces contra jugadores típicos de tu fuerza.',
+      'Then open <b>My build</b> to plan against typical players, your arena opponents, one player or one squadron; <b>Players</b> to see the build of everyone you met; <b>Squadron Groups</b> to set up and check your groups.': 'Luego abre <b>Mi build</b> para planificar contra jugadores típicos, tus oponentes de arena, un jugador o un escuadrón; <b>Jugadores</b> para ver el build de todos los que enfrentaste; <b>Grupos de escuadrón</b> para preparar y comprobar tus grupos.',
+      'Your fights': 'Tus peleas',
+      'Your build from the API': 'Tu build desde la API',
+      'Unofficial fan tool, not made by the game\'s developers. It only reads your account through the official read-only API; it cannot change anything in the game. The planner is the duel simulator of the Astrolabe userscript: typical players use the split found by self-play at equal total stats (35% power, 15% precision, 15% evasion, 35% hull, Block on every piece).': 'Herramienta no oficial hecha por fans, no por los desarrolladores del juego. Solo lee tu cuenta mediante la API oficial de solo lectura; no puede cambiar nada en el juego. El planificador es el simulador de duelos del script Astrolabe: los jugadores típicos usan el reparto hallado jugando contra sí mismo con las mismas estadísticas totales (35% poder, 15% precisión, 15% evasión, 35% casco, Bloqueo en cada pieza).',
+      '{0} battles · {1} duels': '{0} batallas · {1} duelos',
+      'shared': 'compartido',
+      'nothing loaded yet': 'nada cargado aún',
+      'No fights yet: bring them in on the Import fights tab.': 'Aún no hay peleas: tráelas en la pestaña Importar peleas.',
+      'Players seen': 'Jugadores vistos',
+      'name or squadron': 'nombre o escuadrón',
+      'Last fight': 'Última pelea',
+      'arena': 'arena',
+      '{0} more: type part of a name to find them.': '{0} más: escribe parte de un nombre para encontrarlos.',
+      'Orange: last fight more than 7 days ago, their build may have changed. Click a player to see their build.': 'Naranja: última pelea hace más de 7 días, su build puede haber cambiado. Pulsa un jugador para ver su build.',
+      'No player matches.': 'Ningún jugador coincide.',
+      'Plan against {0}': 'Planificar contra {0}',
+      'Typical players at my strength': 'Jugadores típicos de mi fuerza',
+      'My arena opponents ({0})': 'Mis oponentes de arena ({0})',
+      'One player…': 'Un jugador…',
+      'A squadron…': 'Un escuadrón…',
+      'Power × clones, as in Squadron Groups': 'Poder × clones, como en Grupos de escuadrón',
+      'all clones together, as in Squadron Groups': 'todos los clones juntos, como en Grupos de escuadrón',
+      'Your chance to win': 'Tu probabilidad de ganar',
+      'Check my groups': 'Comprobar mis grupos',
+      'Suggest groups for me': 'Sugerir grupos',
       'The shared store could not be reached ({0}). Your own data is still here.': 'No se pudo conectar con el almacén compartido ({0}). Tus propios datos siguen aquí.',
       'Sending to the shared store failed ({0}); it will be tried again next time.': 'El envío al almacén compartido falló ({0}); se volverá a intentar la próxima vez.',
       'Getting everyone\'s battles from the shared store...': 'Obteniendo las batallas de todos del almacén compartido...',
@@ -518,6 +551,39 @@
       'Group {0}': '小队 {0}',
       '(empty)': '（空）',
       'Bench': '替补',
+      'Sections': '栏目',
+      'My build': '我的配置',
+      'Squadron Groups': '舰队编组',
+      'Import fights': '导入战斗',
+      'PvP Badges to keep': '保留的 PvP 徽章',
+      'This page plans your PvP build and your squadron groups. First bring in your fights, in one of these ways:': '本页面规划你的 PvP 配置和舰队编组。首先用以下任一方式导入你的战斗：',
+      '<b>Without installing anything:</b> use the <b>PvP Planner button</b> (below). It works the same way, for one visit.': '<b>无需安装：</b>使用下方的 <b>PvP Planner 按钮</b>。效果相同，仅限本次访问。',
+      '<b>Your build only:</b> in the game open Profile › Game API, copy your key, paste it below and click <b>Load my build</b>. The plan is then against typical players at your strength.': '<b>仅你的配置：</b>在游戏中打开 个人资料 › 游戏 API，复制你的密钥，粘贴到下方并点击<b>载入我的配置</b>。规划将针对与你实力相当的典型玩家。',
+      'Then open <b>My build</b> to plan against typical players, your arena opponents, one player or one squadron; <b>Players</b> to see the build of everyone you met; <b>Squadron Groups</b> to set up and check your groups.': '然后打开<b>我的配置</b>，针对典型玩家、你的竞技场对手、某个玩家或某个舰队进行规划；打开<b>玩家</b>查看你遇到过的每个人的配置；打开<b>舰队编组</b>来安排并检查你的小队。',
+      'Your fights': '你的战斗',
+      'Your build from the API': '通过 API 获取你的配置',
+      'Unofficial fan tool, not made by the game\'s developers. It only reads your account through the official read-only API; it cannot change anything in the game. The planner is the duel simulator of the Astrolabe userscript: typical players use the split found by self-play at equal total stats (35% power, 15% precision, 15% evasion, 35% hull, Block on every piece).': '非官方粉丝工具，并非游戏开发者制作。它只通过官方只读 API 读取你的账号，无法更改游戏中的任何内容。规划器使用 Astrolabe 脚本的对决模拟器：典型玩家采用在相同属性总和下自我对战得出的分配（35% 威力、15% 精准、15% 闪避、35% 舰体，每件装备都是格挡）。',
+      '{0} battles · {1} duels': '{0} 场战斗 · {1} 场对决',
+      'shared': '已共享',
+      'nothing loaded yet': '尚未载入任何内容',
+      'No fights yet: bring them in on the Import fights tab.': '还没有战斗：请在“导入战斗”标签页中导入。',
+      'Players seen': '遇到过的玩家',
+      'name or squadron': '名称或舰队',
+      'Last fight': '最近一次战斗',
+      'arena': '竞技场',
+      '{0} more: type part of a name to find them.': '还有 {0} 个：输入名称的一部分来查找。',
+      'Orange: last fight more than 7 days ago, their build may have changed. Click a player to see their build.': '橙色：最近一次战斗超过 7 天，其配置可能已改变。点击玩家查看其配置。',
+      'No player matches.': '没有匹配的玩家。',
+      'Plan against {0}': '针对 {0} 规划',
+      'Typical players at my strength': '与我实力相当的典型玩家',
+      'My arena opponents ({0})': '我的竞技场对手（{0}）',
+      'One player…': '某个玩家…',
+      'A squadron…': '某个舰队…',
+      'Power × clones, as in Squadron Groups': '威力 × 克隆体，与“舰队编组”相同',
+      'all clones together, as in Squadron Groups': '所有克隆体合计，与“舰队编组”相同',
+      'Your chance to win': '你的胜率',
+      'Check my groups': '检查我的小队',
+      'Suggest groups for me': '为我推荐小队',
       'The shared store could not be reached ({0}). Your own data is still here.': '无法连接共享存储（{0}）。你自己的数据仍在这里。',
       'Sending to the shared store failed ({0}); it will be tried again next time.': '发送到共享存储失败（{0}）；下次会再试。',
       'Getting everyone\'s battles from the shared store...': '正在从共享存储获取所有人的战斗...',
@@ -925,6 +991,13 @@
     }).join('') + '</div>';
   }
 
+  // 419.60K, 22.35M: the way Squadron Groups writes damage and HP.
+  function kmTxt(x) {
+    if (x >= 1e6) return (Math.round(x / 1e4) / 100).toFixed(2) + 'M';
+    if (x >= 1e3) return (Math.round(x / 10) / 100).toFixed(2) + 'K';
+    return String(Math.round(x));
+  }
+
   function confLine(plan) {
     if (!plan) return '';
     var k = vsKind();
@@ -940,8 +1013,8 @@
 
   function renderCur(pv, plan) {
     var t0 = pvTotals(pv), h = '';
-    h += '<div class="tiles">' + tile('Damage', grp(t0.damage), 'per clone hit') + tile('Health', grp(t0.hp), 'per clone') +
-      tile('Win rate', plan ? pvPct(plan.cur.score) + '%' : '--', plan ? vsWho(plan) : 'working') + '</div>';
+    h += '<div class="tiles">' + tile('Damage', kmTxt(t0.damage), t('Power × clones, as in Squadron Groups')) + tile('HP', kmTxt(t0.hp * pv.N), t('all clones together, as in Squadron Groups')) +
+      tile(t('Your chance to win'), plan ? pvPct(plan.cur.score) + '%' : '--', plan ? vsWho(plan) : 'working') + '</div>';
     h += sect('Stat points') + buildTables(pv, t0);
     if (plan) h += hitLines(t0, plan.ref);
     else h += line('Working out the numbers...');
@@ -2200,6 +2273,7 @@
 
   function impMsg(t, cls) { var el = root.querySelector('#impmsg'); if (el) { el.textContent = t || ''; el.className = 'line ' + (cls || ''); } }
   function impStatus(warn) {
+    if (typeof dataPill === 'function') dataPill();
     var el = root.querySelector('#impstat');
     if (!el) return;
     if (!IMP) { el.innerHTML = line(t('Nothing imported yet. See How to use at the top: the PvP Meta script, the PvP Planner button or a share file brings your battles in.'), 'mu'); return; }
@@ -2367,7 +2441,7 @@
 
   function vsSeg() {
     var nd = IMP ? IMP.duels.length : 0, k = vsKind();
-    return '<div class="seg">' + [['meta', 'Meta field'], ['duels', 'My duels (' + nd + ')'], ['player', 'A player'], ['squad', 'A squadron']].map(function (x) {
+    return '<div class="seg">' + [['meta', t('Typical players at my strength')], ['duels', t('My arena opponents ({0})', [nd])], ['player', t('One player…')], ['squad', t('A squadron…')]].map(function (x) {
       return '<button data-vs="' + x[0] + '"' + (k === x[0] ? ' class="on"' : '') + '>' + esc(x[1]) + '</button>';
     }).join('') + '</div>';
   }
@@ -2377,6 +2451,7 @@
     if (!el) return;
     impStatus();
     renderSq();
+    if (typeof renderPlayers === 'function') renderPlayers();
     var k = vsKind(), h = vsSeg();
     if (!IMP && (k === 'player' || k === 'squad' || k === 'duels')) h += line('Import from PvP Meta first (above).', 'warn');
     else if (k === 'duels' && IMP.duels.length < PV_FLOOR) h += line('Only ' + IMP.duels.length + ' duels on record, under the ' + PV_FLOOR + ' needed: the plan uses the meta field until then.', 'warn');
@@ -2843,7 +2918,7 @@
     h += sect('Team builder');
     h += line('Build your own team, like the Squadron Groups page in the game: add members to each group, set their position (1 fights first), remove with ✕. Then test it against the enemy groups ticked above. Nothing changes in the game.', 'mu');
     h += sqgBuilder();
-    h += '<div class="btns"><button class="pri" id="b_sqmy"' + (SQ_MYBUSY ? ' disabled' : '') + '>' + (SQ_MYBUSY ? 'Working...' : 'Test this team') + '</button>' +
+    h += '<div class="btns"><button class="pri" id="b_sqmy"' + (SQ_MYBUSY ? ' disabled' : '') + '>' + (SQ_MYBUSY ? 'Working...' : 'Check my groups') + '</button>' +
       '<button class="sec" id="b_sqreset">Reset to the groups as they are now</button>' + (SQ_RES ? '<button class="sec" id="b_sqtake">Copy the suggested groups into the team builder</button>' : '') + '</div>';
     h += '<div class="line" id="sqmymsg">' + esc(SQ_MYMSG) + '</div>';
     if (SQ_MY) {
@@ -2862,7 +2937,7 @@
       h += '<div class="btns"><button class="sec" id="b_sqmycopy">Copy</button></div>';
     }
     h += sect('Best groups');
-    h += '<div class="btns"><button class="pri" id="b_sqrun"' + (SQ_BUSY ? ' disabled' : '') + '>' + (SQ_BUSY ? 'Working...' : 'Build the best groups') + '</button></div>';
+    h += '<div class="btns"><button class="pri" id="b_sqrun"' + (SQ_BUSY ? ' disabled' : '') + '>' + (SQ_BUSY ? 'Working...' : 'Suggest groups for me') + '</button></div>';
     h += '<div class="line" id="sqmsg">' + esc(SQ_MSG) + '</div>';
     if (SQ_RES) {
       var r = SQ_RES.res, f = SQ_RES.foes, head = ['Your group'].concat(f.map(sqgFoeName)).concat(['Average']);
@@ -3976,7 +4051,13 @@
     'html,body{margin:0;padding:0}',
     'body{background:#f4f6f8}body.dk{background:#1a2129}',
     '.root{min-height:100vh;background:var(--bg)}',
-    '.page{max-width:760px;margin:0 auto;padding:16px 16px 40px}',
+    '.page{max-width:1080px;margin:0 auto;padding:0 16px 40px}',
+    '.top .hd{flex-wrap:wrap;row-gap:6px}.top .hd h1{font-size:17px}.nav button{padding:0 10px}@media (min-width:600px){.nav button{padding:0 16px}}',
+    '.top{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--bd);margin:0 -16px 16px;padding:10px 16px 0}',
+    '.nav{display:flex;gap:2px;flex-wrap:wrap;margin-top:8px}.nav button{min-height:44px;padding:0 16px;border:0;border-bottom:2px solid transparent;background:none;color:var(--mu);font:inherit;font-size:14px;font-weight:600;cursor:pointer}.nav button.on{color:var(--tx);border-bottom-color:var(--ac)}',
+    '.pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--bd);border-radius:999px;padding:3px 10px;font-size:12px;color:var(--mu);background:var(--card)}.pill .dot{width:8px;height:8px;border-radius:50%;background:var(--good)}',
+    '.tabp{display:none}.tabp.on{display:block}.all .tabp{display:block;margin-bottom:24px}',
+    '.box{border-radius:14px}.box h4{font-size:15px}',
     '.hd{display:flex;align-items:center;gap:10px;margin:6px 0 14px}.hd h1{font-size:19px;margin:0;font-weight:700}',
     '.hd .sub{color:var(--mu);font-size:12px}.hd .sp{flex:1}',
     '.hd .g{cursor:pointer;color:var(--mu);padding:3px 9px;border:1px solid var(--bd);border-radius:7px;font-size:12px;background:var(--card)}',
@@ -4013,35 +4094,44 @@
   var B = function (k, cls) { return '<div class="line' + (cls ? ' ' + cls : '') + '">' + t(k) + '</div>'; };
   var SCRIPT_URL = 'https://raw.githubusercontent.com/JohnnyBoyQC/stellar-odyssey-pvp-planner/main/pvp-meta.user.js';
   var firstVisit = !store.get('seen', false); store.set('seen', true);
+  var ALLTABS = /[?&]all\b/.test(location.search);   // every section at once (printing, tests)
   root.innerHTML =
-    '<div class="page">' +
-    '<div class="hd"><h1>⚔ PvP Build Planner <span class="beta">beta</span></h1><span class="sub">' + esc(t('for Stellar Odyssey · fan-made')) + ' · v' + esc(PAGE_VER) + '</span><span class="sp"></span>' + langPick() + '<span class="g" id="theme">◐ ' + esc(t('theme')) + '</span></div>' +
-    // How to use
+    '<div class="page' + (ALLTABS ? ' all' : '') + '">' +
+    '<div class="top"><div class="hd" style="margin:0"><h1>⚔ PvP Build Planner <span class="beta">beta</span></h1><span class="sub">' + esc(t('for Stellar Odyssey · fan-made')) + ' · v' + esc(PAGE_VER) + '</span><span class="sp"></span><span class="pill" id="datapill"></span>' + langPick() + '<span class="g" id="theme">◐ ' + esc(t('theme')) + '</span></div>' +
+    '<nav class="nav" aria-label="' + esc(t('Sections')) + '">' + [['build', 'My build'], ['players', 'Players'], ['squad', 'Squadron Groups'], ['import', 'Import fights']].map(function (x) {
+      return '<button data-tab="' + x[0] + '">' + esc(t(x[1])) + '</button>';
+    }).join('') + '</nav></div>' +
+
+    // ---- My build
+    '<section class="tabp" data-p="build">' +
+    '<div id="status"></div>' +
+    '<div class="box" style="margin:0 0 12px"><h4 style="margin-top:0">' + esc(t('Plan against')) + '</h4><div id="vsbody"></div></div>' +
+    '<div id="out"></div>' +
+    '<div class="box" style="margin-top:16px"><h4 style="margin-top:0">' + esc(t('Settings')) + '</h4><div class="grid">' +
+    '<label>' + esc(t('PvP Badges to keep')) + '<input type="number" min="0" step="1" id="f_kb" value="' + esc(String(S.inputs.keepBadges)) + '"></label>' +
+    '<label>' + esc(t('Least gain worth a change (win %)')) + '<input type="number" min="0" step="any" id="f_gap" value="' + esc(String(S.inputs.bestGap)) + '"></label>' +
+    '</div></div>' +
+    '</section>' +
+
+    // ---- Players
+    '<section class="tabp" data-p="players"><div id="plbody"></div></section>' +
+
+    // ---- Squadron Groups
+    '<section class="tabp" data-p="squad"><div class="box"><h4 style="margin-top:0">' + esc(t('Squadron Groups')) + '</h4><div id="sqbody"></div></div></section>' +
+
+    // ---- Import fights
+    '<section class="tabp" data-p="import">' +
     '<details class="box how" id="howto"' + (firstVisit ? ' open' : '') + '><summary><b>' + esc(t('How to use')) + '</b></summary>' +
-    B('This page plans your PvP build and your squadron groups. First bring in your data, in one of these ways:') +
+    B('This page plans your PvP build and your squadron groups. First bring in your fights, in one of these ways:') +
     '<ol>' +
-    '<li>' + t('<b>Your build only:</b> in the game open Profile › Game API, copy your key, paste it below and click <b>Load my build</b>. The plan is then against the usual meta builds.') + '</li>' +
     '<li>' + t('<b>Everything, automatically (best):</b> install <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">Tampermonkey</a>, then <a href="{0}" target="_blank" rel="noopener">install PvP Meta</a>. In the game, open Battlefield › Battle Log › Squadron, set 50 per page and click through every page once; open Squadron Groups; click View battle on your arena duels. Then click <b>⚔ PvP Meta › Open in planner ↗</b>: this page opens with everything loaded. From then on it keeps what you browse by itself.', [SCRIPT_URL]) + '</li>' +
-    '<li>' + t('<b>Without installing anything:</b> use the <b>PvP Planner button</b> (under "Your duels and squadron battles" below). It works the same way, for one visit.') + '</li>' +
-    '<li>' + t('<b>From a squadmate:</b> someone with PvP Meta clicks <b>Save a share file</b> and posts it in your squadron chat; load it with <b>Load file</b>. It holds the squadron battles and roster, not your own arena duels.') + '</li>' +
+    '<li>' + t('<b>Without installing anything:</b> use the <b>PvP Planner button</b> (below). It works the same way, for one visit.') + '</li>' +
+    '<li>' + t('<b>Your build only:</b> in the game open Profile › Game API, copy your key, paste it below and click <b>Load my build</b>. The plan is then against typical players at your strength.') + '</li>' +
     '</ol>' +
-    B('Then:') +
-    '<ol>' +
-    '<li>' + t('<b>Plan against:</b> choose the meta field, all your recorded duels, one player or one squadron. The <b>Current</b>, <b>Best build</b> and <b>Upgrades</b> tabs answer for that choice.') + '</li>' +
-    '<li>' + t('<b>Squadron groups:</b> untick who will not play, tick up to 3 enemy groups, click <b>Build the best groups</b>. You get the groups in fight order, the win chance against each enemy group, and text to paste in chat. Change the groups yourself in the game.') + '</li>' +
-    '</ol>' +
+    B('Then open <b>My build</b> to plan against typical players, your arena opponents, one player or one squadron; <b>Players</b> to see the build of everyone you met; <b>Squadron Groups</b> to set up and check your groups.') +
     B('Nothing here acts in the game or changes anything in it. The only thing sent anywhere is Load my build, which reads your account through the game\'s official read-only API with your own key. The game rules allow tools for information only. Your data stays in this browser.', 'mu') +
     '</details>' +
-    '<div class="box" style="margin-top:12px">' +
-    '<div class="form">' +
-    '<label>' + esc(t('Realm')) + '<select id="f_realm"><option value="steam">Steam</option><option value="web">Web</option></select></label>' +
-    '<label>' + esc(t('Your API key')) + '<input type="password" id="f_key" autocomplete="off" spellcheck="false" placeholder="' + esc(t('Profile › Game API in the game')) + '"></label>' +
-    '</div>' +
-    '<div class="btns"><button class="pri" id="b_load">' + esc(t('Load my build')) + '</button><button class="sec" id="b_sample">' + esc(t('Try with sample data')) + '</button>' +
-    '<label class="c" style="margin-left:auto"><input type="checkbox" id="f_remember"' + (savedKey ? ' checked' : '') + '>' + esc(t('Remember key on this device')) + '</label></div>' +
-    B('Your key is sent only to the game\'s own public API, straight from this browser. Each load uses 1 of your 50 daily calls to /user; a load within 30 minutes reuses the last answer for free.') +
-    '</div>' +
-    '<div class="box" style="margin-top:16px"><h4 style="margin-top:0">' + esc(t('Your duels and squadron battles')) + '</h4><div id="impstat"></div>' +
+    '<div class="box" style="margin-top:16px"><h4 style="margin-top:0">' + esc(t('Your fights')) + '</h4><div id="impstat"></div>' +
     '<div class="btns"><label class="sec filebtn">' + esc(t('Load file (.json)')) + '<input type="file" id="f_arcfile" accept=".json,application/json"></label><button class="sec" id="b_impshare">' + esc(t('Save a share file')) + '</button><button class="sec" id="b_archdl">' + esc(t('Download saved data')) + '</button><button class="sec" id="b_impclr">' + esc(t('Forget imported data')) + '</button></div>' +
     '<div id="shbox"></div>' +
     '<details id="grabbox" style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">' + esc(t('No script? Use the PvP Planner button')) + '</summary>' +
@@ -4057,20 +4147,65 @@
     B('Reloading the game tab ends it: click the bookmark again next time.', 'mu') +
     '</details>' +
     '<div id="impmsg" class="line"></div></div>' +
-    '<div id="status"></div>' +
-    '<div class="box" style="margin:10px 0 12px"><h4 style="margin-top:0">' + esc(t('Plan against')) + '</h4><div id="vsbody"></div></div>' +
-    '<div id="out"></div>' +
-    '<div class="box" style="margin-top:16px"><h4 style="margin-top:0">' + esc(t('Squadron groups')) + '</h4><div id="sqbody"></div></div>' +
-    '<div class="box" style="margin-top:16px"><h4 style="margin-top:0">' + esc(t('Settings')) + '</h4><div class="grid">' +
-    '<label>' + esc(t('Badges to keep')) + '<input type="number" min="0" step="1" id="f_kb" value="' + esc(String(S.inputs.keepBadges)) + '"></label>' +
-    '<label>' + esc(t('Least gain worth a change (win %)')) + '<input type="number" min="0" step="any" id="f_gap" value="' + esc(String(S.inputs.bestGap)) + '"></label>' +
-    '</div></div>' +
-    '<div class="foot">' + esc(t('Unofficial fan tool, not made by the game\'s developers. It only reads your account through the official read-only API; it cannot change anything in the game. The planner is the duel simulator of the Astrolabe userscript: the meta split comes from self-play at equal total stat (35% power, 15% precision, 15% evasion, 35% hull, Block on every piece).')) + '</div>' +
+    '<div class="box" style="margin-top:16px"><h4 style="margin-top:0">' + esc(t('Your build from the API')) + '</h4>' +
+    '<div class="form">' +
+    '<label>' + esc(t('Realm')) + '<select id="f_realm"><option value="steam">Steam</option><option value="web">Web</option></select></label>' +
+    '<label>' + esc(t('Your API key')) + '<input type="password" id="f_key" autocomplete="off" spellcheck="false" placeholder="' + esc(t('Profile › Game API in the game')) + '"></label>' +
+    '</div>' +
+    '<div class="btns"><button class="pri" id="b_load">' + esc(t('Load my build')) + '</button><button class="sec" id="b_sample">' + esc(t('Try with sample data')) + '</button>' +
+    '<label class="c" style="margin-left:auto"><input type="checkbox" id="f_remember"' + (savedKey ? ' checked' : '') + '>' + esc(t('Remember key on this device')) + '</label></div>' +
+    B('Your key is sent only to the game\'s own public API, straight from this browser. Each load uses 1 of your 50 daily calls to /user; a load within 30 minutes reuses the last answer for free.') +
+    '</div>' +
+    '</section>' +
+
+    '<div class="foot">' + esc(t('Unofficial fan tool, not made by the game\'s developers. It only reads your account through the official read-only API; it cannot change anything in the game. The planner is the duel simulator of the Astrolabe userscript: typical players use the split found by self-play at equal total stats (35% power, 15% precision, 15% evasion, 35% hull, Block on every piece).')) + '</div>' +
     '</div>';
 
   i18nStart(root);
   var $ = function (id) { return root.querySelector('#' + id); };
   $('f_lang').addEventListener('change', function () { try { localStorage.setItem('sopvpweb:lang', JSON.stringify($('f_lang').value)); } catch (e) {} location.reload(); });
+  // The four tabs. A first visit with nothing loaded opens on Import fights.
+  var TAB = store.get('tab', null) || (store.get('imp', null) || store.get('cache', null) ? 'build' : 'import');
+  function showTab(x) {
+    TAB = x; store.set('tab', x);
+    root.querySelectorAll('.nav button').forEach(function (b) { b.className = b.getAttribute('data-tab') === x ? 'on' : ''; });
+    root.querySelectorAll('.tabp').forEach(function (p) { p.className = 'tabp' + (p.getAttribute('data-p') === x ? ' on' : ''); });
+  }
+  root.querySelectorAll('.nav button').forEach(function (b) { b.addEventListener('click', function () { showTab(b.getAttribute('data-tab')); }); });
+  showTab(TAB);
+  function dataPill() {
+    var el = root.querySelector('#datapill');
+    if (!el) return;
+    var c = typeof archCount === 'function' ? archCount() : { b: 0, d: 0 }, nb = IMP && IMP.x && IMP.x.battles ? IMP.x.battles.length : c.b, nd = IMP ? IMP.duels.length : 0;
+    el.innerHTML = nb || nd || S.storeOk ? '<span class="dot"></span>' + esc(t('{0} battles · {1} duels', [grp(nb), grp(nd)])) + (typeof clOn === 'function' && clOn() ? ' · ' + esc(t('shared')) : '') : esc(t('nothing loaded yet'));
+  }
+  // Players: everyone met, their estimated build, and a way to plan against them.
+  var PL_Q = '';
+  function renderPlayers() {
+    var el = root.querySelector('#plbody');
+    if (!el) return;
+    dataPill();
+    if (!IMP) { el.innerHTML = '<div class="box">' + line(t('No fights yet: bring them in on the Import fights tab.'), 'warn') + '</div>'; return; }
+    var q = PL_Q.toLowerCase(), all = IMP.x.players, list = all.filter(function (p) { return !q || p.name.toLowerCase().indexOf(q) >= 0 || String(p.sq || '').toLowerCase().indexOf(q) >= 0; });
+    var sel = vsCard(VS.pl) || list[0] || null;
+    var h = '<div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">';
+    h += '<div class="box" style="flex:999 1 520px;min-width:0"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><h4 style="margin:0">' + esc(t('Players seen')) + ' (' + all.length + ')</h4><span class="sp" style="flex:1"></span><input type="search" id="f_plq" value="' + esc(PL_Q) + '" placeholder="' + esc(t('name or squadron')) + '" style="max-width:220px"></div>';
+    h += '<div class="card wide" style="margin-top:8px"><table class="t pick"><thead><tr><th>' + esc(t('Player')) + '</th><th>' + esc(t('Squadron')) + '</th><th>' + esc(t('Last fight')) + '</th><th>' + esc(t('Precision')) + '</th><th>' + esc(t('Evasion')) + '</th><th>' + esc(t('Skills')) + '</th></tr></thead><tbody>' +
+      list.slice(0, 60).map(function (p) {
+        var e1 = estTxt(p.P), e2 = estTxt(p.E);
+        return '<tr data-plp="' + esc(p.name) + '"' + (sel && p.name === sel.name ? ' class="hl"' : '') + '><td><b>' + esc(p.name) + '</b></td><td>' + esc(p.sq || t('arena')) + '</td><td' + (vsOld(p.t) ? ' class="warn"' : '') + '>' + esc(whenTxt(p.t)) + '</td><td class="' + e1.c + '">' + esc(e1.t) + '</td><td class="' + e2.c + '">' + esc(e2.t) + '</td><td>' + esc(skTxt(p.sk)) + (p.sk && p.skc < 0.6 ? ' ?' : '') + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+    if (list.length > 60) h += line(t('{0} more: type part of a name to find them.', [list.length - 60]), 'mu');
+    h += line(t('Orange: last fight more than 7 days ago, their build may have changed. Click a player to see their build.'), 'mu') + '</div>';
+    h += '<div class="box" style="flex:1 1 340px;min-width:0">' + (sel ? vsBuildCard(sel) + '<div class="btns"><button class="pri" id="b_plvs">' + esc(t('Plan against {0}', [sel.name])) + '</button></div>' : line(t('No player matches.'), 'mu')) + '</div>';
+    h += '</div>';
+    el.innerHTML = h;
+    var qi = el.querySelector('#f_plq');
+    if (qi) qi.addEventListener('input', function () { PL_Q = qi.value; var pos = qi.selectionStart; renderPlayers(); var n = root.querySelector('#f_plq'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} } });
+    el.querySelectorAll('tr[data-plp]').forEach(function (r) { r.addEventListener('click', function () { VS.pl = r.getAttribute('data-plp'); store.set('vs', VS); renderPlayers(); }); });
+    var pb = el.querySelector('#b_plvs');
+    if (pb) pb.addEventListener('click', function () { VS.kind = 'player'; VS.pl = sel.name; store.set('vs', VS); renderVs(); render(); showTab('build'); });
+  }
   var realmEl = $('f_realm'), keyEl = $('f_key'), remEl = $('f_remember'), statusEl = $('status'), out = $('out');
   realmEl.value = store.get('realm', 'steam') === 'web' ? 'web' : 'steam';
   if (savedKey) keyEl.value = savedKey;
