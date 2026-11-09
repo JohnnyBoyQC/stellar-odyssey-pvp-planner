@@ -62,6 +62,7 @@ Under **Squadron groups** the page shows your squadron's roster exactly as Squad
 - **1.4.2** (page) and **1.3.2** (script): stats and skills are tested together: each skill set gets its own tuned split.
 - **1.4.3** (page): team builder in Squadron groups: pick who fights in each place of each group, test it against the enemy groups, compare with your groups as they are now.
 - **1.4.4** (page): the team builder is laid out like the game's Squadron Groups page: three groups with totals, a member picker, member cards with position, stats and remove.
+- **1.4.5** (page): everything loaded with the PvP Planner button or from a file is saved in the browser and each new load adds to it (no need to load old logs again). Download saved data gives it as a file.
 - **1.3** (script and page): squadron group builder with a 3x3 win table, share file for players without the script, squadron simulator. The duel recorder now counts a hit that kills with a DoT tick.
 - **1.2** (script and page): Open in planner, player and squadron picker, new arena duels keep the opponent's name, dark theme by default, beta label.
 - **1.1** (script and page): the duel engine follows rules measured on real fight logs. DoT is applied before the block roll. A dual shot is one swing on one target, and its second shot needs its own hit and block. Damage is rounded down. The duel recorder now reads dual shots and crit damage correctly (older versions mistook dual shots for crits). Plus the battle archive above.
