@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PvP Build Planner (beta)</title>
-<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.2.0">
+<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.2.1">
 </head>
 <body>
 <script>
 (function () {
   'use strict';
-  var PAGE_VER = "1.2.0";
+  var PAGE_VER = "1.2.1";
 
   /* ============================================================
      PvP Build Planner (web page)
@@ -770,7 +770,11 @@
   function impStatus(warn) {
     var el = root.querySelector('#impstat');
     if (!el) return;
-    if (!IMP) { el.innerHTML = line('Nothing imported yet. In the game, open ⚔ PvP Meta (1.2 or later) and click Open in planner, or load the archive file it downloads.', 'mu'); return; }
+    if (!IMP) {
+      el.innerHTML = '<div class="line">Nothing imported yet. This page cannot read your battle logs itself: the public API has none, and the game rules do not let a page or script ask the game for them. The in-game <b>PvP Meta</b> userscript (<a href="https://raw.githubusercontent.com/JohnnyBoyQC/stellar-odyssey-pvp-planner/main/pvp-meta.user.js" target="_blank" rel="noopener">install it in Tampermonkey</a>) keeps every log you open, then sends them here in one click:</div>' +
+        '<div class="line">1. In the game, open Battlefield › Battle Log › Squadron, set 50 per page and click through the pages once (and open Squadron Groups once).<br>2. Click <b>⚔ PvP Meta › Open in planner ↗</b>. This page opens with everything loaded.</div>';
+      return;
+    }
     var x = IMP.x, sq = {};
     x.players.forEach(function (p) { if (p.sq) sq[p.sq] = 1; });
     el.innerHTML = '<div class="tiles">' + tile('Players', String(x.players.length), Object.keys(sq).length + ' squadrons') + tile('Squadron battles', String(x.battles ? x.battles.length : 0), x.own ? 'yours: ' + x.own : '') +
@@ -933,7 +937,7 @@
   }
 
   /* ============================================================
-     FROM ASTROLABE 3.22.8 (copied unchanged by the build step)
+     FROM ASTROLABE 3.22.9 (copied unchanged by the build step)
      ============================================================ */
 
   var AR_MAX = 200;
@@ -1232,6 +1236,12 @@
           else if (e.action === 'attack blocked') { A.hit++; get(dO || ao).blocked++; }
           else A.miss++;
           // A dual shot is one log line holding both shots; arDamage reads it.
+        } else if (e.action === 'DoT triggers') {
+          // A DoT charge that kills ends the swing that burnt it: no attack
+          // line follows, but the swing landed (counting it as missing read
+          // the opponent's evasion about 3% high).
+          var hk = arHp(e.hpLeft);
+          if (hk && hk.hp <= 0) { if (first === null) first = ao; A.att++; A.hit++; }
         } else if (e.action === 'applies DoT') A.dot++;
         else if (e.action === 'stuns') A.stun++;
         else if (e.action === 'focused') A.focus++;
