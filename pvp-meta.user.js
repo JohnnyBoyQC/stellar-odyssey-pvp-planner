@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stellar Odyssey – PvP Meta
 // @namespace    stellarodyssey-pvpmeta
-// @version      1.3.4
+// @version      1.3.5
 // @description  Arena build planner for Stellar Odyssey: the meta split at your own total stat, the best free re-spec, which upgrades pay, and a record of your duels. Built from Astrolabe 3.22.9's simulator. Keeps the squadron battles, arena duels and roster you browse, and opens them in the web planner in one click (player and squadron picker). Reads the page only: no network requests, no game actions.
 // @match        *://steam.stellarodyssey.app/*
 // @grant        GM_getValue
@@ -71,11 +71,11 @@
       PV_CONTESTED: PV_CONTESTED, PV_DECIDED: PV_DECIDED, PV_FLOOR: PV_FLOOR, PV_MAX_BATTLES: PV_MAX_BATTLES, PV_MIN_EACH: PV_MIN_EACH,
       PV_SEARCH_MAX: PV_SEARCH_MAX, PV_SEED: PV_SEED, PV_SIMS: PV_SIMS,
       PV_META: PV_META, PV_META_COPIES: PV_META_COPIES,
-      RL_A: RL_A, RL_B: RL_B, RL_MAX_CLONES: RL_MAX_CLONES, RL_MAX_ROUNDS: RL_MAX_ROUNDS, PV_CLIMB_SIMS: PV_CLIMB_SIMS
+      RL_A: RL_A, RL_B: RL_B, RL_MAX_CLONES: RL_MAX_CLONES, RL_MAX_ROUNDS: RL_MAX_ROUNDS, PV_CLIMB_SIMS: PV_CLIMB_SIMS, AR_PAIR: AR_PAIR
     };
   }
   function WK_FNS() {
-    return [numOr, btRng, arAssume, arDraws, arSide, pvAllocate, pvBestAssign, pvClimb, pvCompositions, pvCopy, pvGap, pvGearBase, pvGearVal, pvLevelCost,
+    return [numOr, btRng, arAssume, arDraws, arSide, pvAllocate, pvBestAssign, pvClimb, pvKeepGear, pvCompositions, pvCopy, pvGap, pvGearBase, pvGearVal, pvLevelCost,
       pvMetaPool, pvNeedFor, pvPlanRun, pvPool, pvPoolRef, pvReplay, pvSample, pvScore, pvScoreOf, pvSkills, pvSpend, pvTerm,
       pvTierCost, pvTotals, pvUpgradeRows, rlDuel, rlLeft, rlLoad, rlMe, rlPhase, rlSlot, rngStreams];
   }
@@ -241,7 +241,7 @@
         // t's evasion, from a swing by an attacker whose precision is known
         if (ka && ka.p > 0) add(ot.e, ka.p * fa / ft, 1 - hit);
         if (hit) {
-          oa.sk.L++; ot.sk.blkT++;
+          oa.sk.L++; if (!dotKill) ot.sk.blkT++;
           if (act === 'attack blocked') ot.sk.blk++;
           else if (act === 'attacks') { var hl = pxHpLeft(e.hpLeft); if (hl === null || hl > 0) oa.sk.stunT++; }
         }
@@ -308,7 +308,7 @@
   // when its log-likelihood gain (x2) passes that test's threshold, set from
   // the no-change spread in cp_test.js (about 2 false alarms in 100 players
   // with no change, for each test). Each observation carries its fight time.
-  var PX_CP_THP = 14, PX_CP_THK = 14, PX_CP_MIN = 60, PX_CP_SPLITS = 40;
+  var PX_CP_THP = 14, PX_CP_THK = 17, PX_CP_MIN = 60, PX_CP_SPLITS = 40;
   function pxLLp(obs) {
     if (!obs.length) return 0;
     var f = pxFit(obs);
@@ -335,7 +335,7 @@
     var T = Object.keys(times).map(Number).sort(function (a, b) { return a - b; });
     var bP = null, bK = null;
     if (T.length < 4) return { P: bP, K: bK };
-    var allP = pxLLp(P) + pxLLp(E), allK = pxLLsk(K), step = Math.max(1, Math.floor(T.length / PX_CP_SPLITS));
+    var allP = pxLLp(P) + pxLLp(E), allK = pxLLsk(K), step = Math.max(1, Math.ceil(T.length / PX_CP_SPLITS));
     for (var j = 1; j < T.length; j += step) {
       var tau = T[j];
       var Pb = P.filter(function (o) { return o[3] < tau; }), Pa = P.filter(function (o) { return o[3] >= tau; });
@@ -352,6 +352,40 @@
     var st = pxSplitStats(P, E, K), rp = st.P ? st.P.s / PX_CP_THP : 0, rk = st.K ? st.K.s / PX_CP_THK : 0;
     if (rp <= 1 && rk <= 1) return null;
     return rp >= rk ? { t: st.P.t, s: st.P.s, what: 'stats' } : { t: st.K.t, s: st.K.s, what: 'skills' };
+  }
+
+  // A jump in hit or dodge rates found for one player is checked against
+  // all the others at the same moment: if their precision or evasion, as
+  // read from the logs, moved the same way too (pooled over every other
+  // player, z above 2), the change was on OUR side (our members got
+  // stronger, the roster on file is older) and is marked c.ours = 1.
+  function pxShift(obs, tau) {
+    var b = obs.filter(function (o) { return o[3] < tau; }), a = obs.filter(function (o) { return o[3] >= tau; });
+    var fb = b.length ? pxFit(b) : null, fa = a.length ? pxFit(a) : null;
+    if (!fb || !fa || fb.info < 3 || fa.info < 3) return null;
+    return { d: Math.log(fa.v / fb.v), se: Math.sqrt(fa.se * fa.se + fb.se * fb.se) };
+  }
+  var PX_CP_Z = 3, PX_CP_Z2 = 1.5;
+  function pxMarkOurs(cards) {
+    cards.forEach(function (c) {
+      if (!c.chg || c.chg.what !== 'stats' || !c.oP) return;
+      var tau = c.chg.t, me = { p: pxShift(c.oP, tau), e: pxShift(c.oE, tau) }, z = {};
+      ['p', 'e'].forEach(function (k) {
+        z[k] = 0;
+        if (!me[k]) return;
+        var w = 0, sw = 0;
+        cards.forEach(function (o) {
+          if (o === c || !o.oP) return;
+          var x = pxShift(k === 'p' ? o.oP : o.oE, tau);
+          if (x && x.se > 0) { w += x.d / (x.se * x.se); sw += 1 / (x.se * x.se); }
+        });
+        // z of the others' pooled move, counted only when it goes the same way as this player's
+        if (sw > 0) { var m = w / sw; z[k] = m * me[k].d > 0 ? Math.abs(m) * Math.sqrt(sw) : 0; }
+      });
+      // One stat moved hard for everyone, or both moved clearly.
+      if (Math.max(z.p, z.e) > PX_CP_Z || (z.p > PX_CP_Z2 && z.e > PX_CP_Z2)) c.ours = 1;
+    });
+    return cards;
   }
 
   function pxSumSk(a, b) { Object.keys(b).forEach(function (k) { a[k] = (a[k] || 0) + b[k]; }); return a; }
@@ -442,19 +476,28 @@
 
     // One card per player: the latest build seen, and the estimates from
     // that build's battles when they are enough, else from all of them.
-    var out = [];
+    var out = [], cards = [];
+    function cat(which, list) { var all = []; list.forEach(function (x) { all = all.concat(x[which] || []); }); return all; }
     Object.keys(players).forEach(function (u) {
       var p = players[u];
       if (!p.snaps.length) return;
       p.snaps.sort(function (x, y) { return x.t1 - y.t1; });
       var sq = p.snaps.filter(function (x) { return !x.duel; }), last = (sq.length ? sq : p.snaps)[(sq.length ? sq : p.snaps).length - 1];
-      function cat(which, list) { var all = []; list.forEach(function (x) { all = all.concat(x[which] || []); }); return all; }
       var pL = pxFit(cat('p', [last])), eL = pxFit(cat('e', [last])), mixed = 0;
       var useLast = !!(pL && pL.info >= 6 && eL && eL.info >= 6);
       var used = useLast ? [last] : p.snaps;
       if (!useLast && p.snaps.length > 1) mixed = 1;
-      // A hidden change inside the fights used: keep only those after it.
-      var oP = cat('p', used), oE = cat('e', used), oK = cat('skl', p.snaps), chg = pxSplit(oP, oE, oK);
+      // A hidden change inside the fights used (pxSplit).
+      var oP = cat('p', used), oE = cat('e', used), oK = cat('skl', p.snaps);
+      cards.push({ u: u, p: p, last: last, mixed: mixed, oP: oP, oE: oE, oK: oK, chg: ownNames[u] ? null : pxSplit(oP, oE, oK) });
+    });
+    // A jump in hit or dodge rates at the same time for several players is a
+    // change on OUR side (our members got stronger and the roster on file is
+    // older), not theirs: those splits are dropped. Skill-rate splits do not
+    // depend on our stats and are kept.
+    pxMarkOurs(cards);
+    cards.forEach(function (c) {
+      var p = c.p, last = c.last, chg = c.ours ? null : c.chg, oP = c.oP, oE = c.oE, oK = c.oK, u = c.u;
       if (chg) {
         oP = oP.filter(function (o) { return o[3] >= chg.t; }); oE = oE.filter(function (o) { return o[3] >= chg.t; });
         oK = oK.filter(function (x) { return x[0] >= chg.t; });
@@ -463,9 +506,9 @@
       var skk = {}; oK.forEach(function (x) { pxSumSk(skk, x[1]); });
       var sk = skk.L || skk.blkT ? pxSkills({ L: skk.L || 0, dot: skk.dot || 0, focus: skk.focus || 0, stunT: skk.stunT || 0, stun: skk.stun || 0, blkT: skk.blkT || 0, blk: skk.blk || 0 }) : null;
       var cl = last.cl;
-      if (!cl && last.c) cl = last.c.map(function (c) { return [c[0], c[1], c[2]]; });
+      if (!cl && last.c) cl = last.c.map(function (x) { return [x[0], x[1], x[2]]; });
       function r3(f) { return f ? [Math.round(f.v), Math.round(f.se * 1000) / 1000, f.n] : null; }
-      out.push({ bt: chg ? Math.max(chg.t, last.t0) : last.t0, bl: last.t1, chg: chg ? chg.t : 0, name: u, sq: p.sq, g: p.g || 0, own: ownNames[u] || p.sq === own ? 1 : 0, t: p.t, nb: p.nb, nd: p.nd, snaps: p.snaps.length, mixed: mixed,
+      out.push({ bt: chg ? Math.max(chg.t, last.t0) : last.t0, bl: last.t1, chg: chg ? chg.t : 0, chgw: chg ? chg.what : '', ours: c.ours ? c.chg.t : 0, name: u, sq: p.sq, g: p.g || 0, own: ownNames[u] || p.sq === own ? 1 : 0, t: p.t, nb: p.nb, nd: p.nd, snaps: p.snaps.length, mixed: c.mixed,
         d: last.d, h: last.h, n: last.n, cl: cl || [[0, 0, 0]], P: r3(pp), E: r3(ee), sk: sk ? sk.s : null, skc: sk ? sk.conf : 0, skn: sk ? sk.n : 0 });
     });
     out.sort(function (x, y) { return y.t - x.t; });
@@ -616,7 +659,7 @@
       // piece keeping its own skill where the winning set still has it.
       var cur = short.filter(function (x) { return x.key === curKey; })[0];
       var pick = cur && cur.m >= short[0].m - 0.8 ? cur : short[0];   // inside the noise: keep what is there
-      cand = pick.b;
+      cand = pvKeepGear(pick.b, pv);
       var left = pick.comp.slice(), out = new Array(cand.gear.length);
       curSkills.forEach(function (sk, i) { var j = left.indexOf(sk); if (j >= 0) { out[i] = sk; left.splice(j, 1); } });
       for (var i = 0; i < out.length; i++) if (out[i] === undefined) out[i] = left.shift();
@@ -638,6 +681,76 @@
       }
       done(plan);
     } catch (e) { done(null, e); }
+  }
+
+  // When several ways of giving the gear pieces their stats land on the same
+  // totals, keep the one closest to the gear as it is: re-setting a piece
+  // for nothing is not advice (Fable's review, 2026-11-09).
+  function pvKeepGear(b, now) {
+    var n = b.gear.length, want = pvGearBase(b), best = null, bm = -1, total = Math.pow(PVP_STATS.length, n);
+    if (n > 6) return b;
+    for (var a = 0; a < total; a++) {
+      var c = pvCopy(b), x = a, m = 0;
+      for (var i = 0; i < n; i++) { c.gear[i].stat = PVP_STATS[x % PVP_STATS.length]; x = Math.floor(x / PVP_STATS.length); if (now.gear[i] && c.gear[i].stat === now.gear[i].stat) m++; }
+      var g = pvGearBase(c), same = PVP_STATS.every(function (s) { return Math.abs(g[s] - want[s]) < 0.5; });
+      if (same && m > bm) { bm = m; best = c; }
+    }
+    return best || b;
+  }
+
+  // The arena duel, with the wiki's end rule: after 300 rounds the side with
+  // more health left wins (absolute health, not a share), a tie going to
+  // the defender. Otherwise as Astrolabe's rlDuel.
+  function rlDuel(SA, SB, aFirst, seed) {
+    var A = RL_A, B = RL_B, first, second, r;
+    var R = rngStreams(seed, ['dual', 'pick', 'hit', 'block', 'crit', 'dot', 'stun', 'focus', 'crit2', 'hit2', 'block2']);
+    rlLoad(A, SA); rlLoad(B, SB);
+    first = aFirst ? A : B; second = aFirst ? B : A;
+    for (r = 1; r <= RL_MAX_ROUNDS && A.alive > 0 && B.alive > 0; r++) {
+      rlPhase(first, second, R);
+      if (second.alive <= 0) break;
+      rlPhase(second, first, R);
+    }
+    var la = rlLeft(A), lb = rlLeft(B);
+    var ha = la * Math.min(SA.N, RL_MAX_CLONES) * SA.hp, hb = lb * Math.min(SB.N, RL_MAX_CLONES) * SB.hp;
+    return { win: B.alive <= 0 ? 1 : (A.alive <= 0 ? 0 : (ha > hb ? 1 : (ha < hb ? 0 : (aFirst ? 1 : 0)))),
+      rounds: r > RL_MAX_ROUNDS ? RL_MAX_ROUNDS : r, fracA: la, fracB: lb };
+  }
+
+  // An opponent's precision and evasion drawn within their error bars
+  // (five draws). The spread now has the same standard deviation as the
+  // estimate (Astrolabe's carried 0.79 of it), and precision and evasion
+  // are paired so they do not move together or against each other: high
+  // and low of each meet (Astra's and Fable's review, 2026-11-09).
+  var AR_SPREAD = [-1.45, -0.63, 0, 0.63, 1.45];
+  var AR_PAIR = [1, 4, 2, 0, 3];
+  function arDraws(f, pRef, eRef) {
+    var q = (f.q && f.q.length >= 4) ? f.q : null, out = [];
+    pRef = pRef || f.p; eRef = eRef || f.e;
+    if (!q) { try { q = arAssume(f, pRef, eRef); } catch (e) { return [arSide(f)]; } }
+    for (var j = 0; j < 4; j++) if (numOr(q[j]) === null || q[j] < 0) return [arSide(f)];
+    if (!(q[1] > 0) || !(q[3] > 0)) return [arSide(f)];
+    function stat(hits, swings, known, invert) {
+      var p = Math.min(0.98, Math.max(0.02, hits / Math.max(1, swings)));
+      var se = Math.sqrt(p * (1 - p) / Math.max(1, swings));
+      var v = AR_SPREAD.map(function (z) {
+        var q2 = Math.min(0.98, Math.max(0.02, p + z * se));
+        return invert ? known * (1 - q2) / q2 : known * q2 / (1 - q2);
+      });
+      var mean = 0, mid = v[(AR_SPREAD.length - 1) >> 1];
+      v.forEach(function (x) { mean += x; });
+      mean /= v.length;
+      var k = mean > 0 ? mid / mean : 1;
+      return v.map(function (x) { return x * k; });
+    }
+    var P = stat(q[0], q[1], eRef, false), E = stat(q[2], q[3], pRef, true);
+    for (var i = 0; i < AR_SPREAD.length; i++) {
+      var s = arSide(f);
+      s.prec = Math.max(20, Math.round(P[i]));
+      s.eva = Math.max(20, Math.round(E[AR_PAIR[i]]));
+      out.push(s);
+    }
+    return out;
   }
 
   /* ============================================================
@@ -742,7 +855,7 @@
   var plPending = null;
   window.addEventListener('message', function (e) {
     var d = e && e.data;
-    if (!plPending || e.origin !== PLANNER_ORIGIN || !d || d.sopvpReady !== plPending.nonce || !e.source) return;
+    if (!plPending || e.origin !== PLANNER_ORIGIN || !d || d.sopvpReady !== plPending.nonce || !e.source || (PL.win && e.source !== PL.win)) return;
     try { e.source.postMessage({ sopvpData: plPending.obj, nonce: plPending.nonce }, PLANNER_ORIGIN); } catch (er) { PL.err = 'handing the data over failed: ' + er.message; }
     plPending = null;
   });
@@ -764,6 +877,7 @@
         if (code.length <= PL_MAX_URL) url = PLANNER_URL + '#data=' + code;
         else { var nonce = String(Math.random()).slice(2); plPending = { nonce: nonce, obj: obj }; url = PLANNER_URL + '#wait=' + nonce; }
         PL.last = { n: obj.x.players.length, b: obj.x.battles.length, d: obj.duels.length, kb: Math.round(code.length / 1024) };
+        PL.win = w && !w.closed ? w : null;
         if (w && !w.closed) { try { w.location.replace(url); } catch (e) { PL.link = url; } }
         else PL.link = url;
       });
@@ -775,7 +889,7 @@
 
   function plRow() {
     var h = '<div class="row"><button class="act" id="b_plopen"' + (PL.busy ? ' disabled' : '') + '>' + (PL.busy ? 'Preparing...' : 'Open in planner ↗') + '</button></div>';
-    if (PL.link) h += '<div class="line">Your browser blocked the new tab. <a href="' + esc(PL.link) + '" target="_blank" rel="noopener">Open the planner</a></div>';
+    if (PL.link) h += '<div class="line">Your browser blocked the new tab. <a id="pl_link" href="' + esc(PL.link) + '" target="_blank"' + (/#wait=/.test(PL.link) ? '' : ' rel="noopener"') + '>Open the planner</a></div>';
     if (PL.err) h += line(PL.err, 'bad');
     if (PL.last && !PL.busy) h += line('Sent ' + PL.last.d + ' duels and ' + PL.last.n + ' players from ' + PL.last.b + ' squadron battles (' + PL.last.kb + ' KB), inside the link only: no server sees them.', 'mu');
     return h;
@@ -1214,48 +1328,11 @@
     return rec.r + '|' + rec.w + '|' + rec.o.d + ':' + rec.o.h + '|' + rec.e.d + ':' + rec.e.h;
   }
 
-  var AR_SPREAD = [-1.15, -0.5, 0, 0.5, 1.15];
-
   var AR_ASSUME = 24;
 
   function arAssume(f, pRef, eRef) {
     var hitUs = f.p / (f.p + eRef), hitThem = pRef / (pRef + f.e);
     return [Math.round(hitUs * AR_ASSUME), AR_ASSUME, Math.round(hitThem * AR_ASSUME), AR_ASSUME];
-  }
-
-  function arDraws(f, pRef, eRef) {
-    var q = (f.q && f.q.length >= 4) ? f.q : null, out = [];
-    pRef = pRef || f.p; eRef = eRef || f.e;
-    if (!q) { try { q = arAssume(f, pRef, eRef); } catch (e) { return [arSide(f)]; } }
-    for (var j = 0; j < 4; j++) if (numOr(q[j]) === null || q[j] < 0) return [arSide(f)];
-    if (!(q[1] > 0) || !(q[3] > 0)) return [arSide(f)];
-    // hits out of swings is a coin flip repeated, so the spread of the
-    // underlying rate is the usual sqrt(p(1-p)/n).
-    function stat(hits, swings, known, invert) {
-      var p = Math.min(0.98, Math.max(0.02, hits / Math.max(1, swings)));
-      var se = Math.sqrt(p * (1 - p) / Math.max(1, swings));
-      var v = AR_SPREAD.map(function (z) {
-        var q2 = Math.min(0.98, Math.max(0.02, p + z * se));
-        return invert ? known * (1 - q2) / q2 : known * q2 / (1 - q2);
-      });
-      // Turning a hit rate back into a stat bends the scale, so an even
-      // spread of rates comes out lopsided in stat points. Recentre on the
-      // plain estimate: the doubt is kept, the drift is not.
-      var mean = 0, mid = v[(AR_SPREAD.length - 1) >> 1];
-      v.forEach(function (x) { mean += x; });
-      mean /= v.length;
-      var k = mean > 0 ? mid / mean : 1;
-      return v.map(function (x) { return x * k; });
-    }
-    var P = stat(q[0], q[1], eRef, false);   // their precision, against our evasion
-    var E = stat(q[2], q[3], pRef, true);    // their evasion, against our precision
-    for (var i = 0; i < AR_SPREAD.length; i++) {
-      var s = arSide(f);
-      s.prec = Math.max(20, Math.round(P[i]));
-      s.eva = Math.max(20, Math.round(E[i]));
-      out.push(s);
-    }
-    return out;
   }
 
   function arSide(f) {
@@ -1332,23 +1409,6 @@
     var s = 0, i;
     for (i = 0; i < f.S.N; i++) if (f.hp[i] > 0) s += f.hp[i];
     return s / (f.S.N * f.S.hp);
-  }
-
-  function rlDuel(SA, SB, aFirst, seed) {
-    var A = RL_A, B = RL_B, first, second, r;
-    var R = rngStreams(seed, ['dual', 'pick', 'hit', 'block', 'crit', 'dot', 'stun', 'focus', 'crit2', 'hit2', 'block2']);
-    rlLoad(A, SA); rlLoad(B, SB);
-    first = aFirst ? A : B; second = aFirst ? B : A;
-    for (r = 1; r <= RL_MAX_ROUNDS && A.alive > 0 && B.alive > 0; r++) {
-      rlPhase(first, second, R);
-      if (second.alive <= 0) break;
-      rlPhase(second, first, R);
-    }
-    var la = rlLeft(A), lb = rlLeft(B);
-    // After 300 rounds the side with more health left wins; a tie goes to the
-    // defender, the side that strikes first (the game's arena wiki).
-    return { win: B.alive <= 0 ? 1 : (A.alive <= 0 ? 0 : (la > lb ? 1 : (la < lb ? 0 : (aFirst ? 1 : 0)))),
-      rounds: r > RL_MAX_ROUNDS ? RL_MAX_ROUNDS : r, fracA: la, fracB: lb };
   }
 
   function rlMe(b) {
