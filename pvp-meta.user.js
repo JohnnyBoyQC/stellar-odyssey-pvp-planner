@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stellar Odyssey – PvP Meta
 // @namespace    stellarodyssey-pvpmeta
-// @version      1.3.3
+// @version      1.3.4
 // @description  Arena build planner for Stellar Odyssey: the meta split at your own total stat, the best free re-spec, which upgrades pay, and a record of your duels. Built from Astrolabe 3.22.9's simulator. Keeps the squadron battles, arena duels and roster you browse, and opens them in the web planner in one click (player and squadron picker). Reads the page only: no network requests, no game actions.
 // @match        *://steam.stellarodyssey.app/*
 // @grant        GM_getValue
@@ -299,6 +299,61 @@
     return { s: best.s, conf: Math.round(best.w / tot * 100) / 100, n: k.L + k.blkT };
   }
 
+  // ---- hidden build changes (1.4.7) ----
+  // A player who moves points between precision and evasion, or swaps
+  // skills, keeps the same damage, health and clones, so the snapshot key
+  // does not see it. Their fights are split at the time that best explains
+  // a jump in their hit rate and the rate they are missed (one test), or in
+  // their DoT, Stun and Block rates (another test). A split is kept only
+  // when its log-likelihood gain (x2) passes that test's threshold, set from
+  // the no-change spread in cp_test.js (about 2 false alarms in 100 players
+  // with no change, for each test). Each observation carries its fight time.
+  var PX_CP_THP = 14, PX_CP_THK = 14, PX_CP_MIN = 60, PX_CP_SPLITS = 40;
+  function pxLLp(obs) {
+    if (!obs.length) return 0;
+    var f = pxFit(obs);
+    if (!f) return 0;
+    var ll = 0;
+    obs.forEach(function (o) { ll += pxLogBin(o[1], o[2], f.v / (f.v + o[0])); });
+    return ll;
+  }
+  function pxLLsk(list) {
+    var k = {};
+    list.forEach(function (x) { pxSumSk(k, x[1]); });
+    var ll = 0;
+    [['dot', 'L'], ['stun', 'stunT'], ['blk', 'blkT']].forEach(function (q) { var n = k[q[1]] || 0, x = k[q[0]] || 0; if (n > 0) ll += pxLogBin(x, n, x / n); });
+    return ll;
+  }
+  function pxTries(obs) { var n = 0; obs.forEach(function (o) { n += o[2]; }); return n; }
+  // P, E: [R, x, n, t] lists; K: [t, skill events] list. Returns the split
+  // time and its statistics, or null when nothing changed beyond chance.
+  // pxSplitStats gives the largest of each statistic, for the calibration.
+  function pxSplitStats(P, E, K) {
+    var times = {};
+    P.concat(E).forEach(function (o) { times[o[3]] = 1; });
+    K.forEach(function (x) { times[x[0]] = 1; });
+    var T = Object.keys(times).map(Number).sort(function (a, b) { return a - b; });
+    var bP = null, bK = null;
+    if (T.length < 4) return { P: bP, K: bK };
+    var allP = pxLLp(P) + pxLLp(E), allK = pxLLsk(K), step = Math.max(1, Math.floor(T.length / PX_CP_SPLITS));
+    for (var j = 1; j < T.length; j += step) {
+      var tau = T[j];
+      var Pb = P.filter(function (o) { return o[3] < tau; }), Pa = P.filter(function (o) { return o[3] >= tau; });
+      var Eb = E.filter(function (o) { return o[3] < tau; }), Ea = E.filter(function (o) { return o[3] >= tau; });
+      if (pxTries(Pb) + pxTries(Eb) < PX_CP_MIN || pxTries(Pa) + pxTries(Ea) < PX_CP_MIN) continue;
+      var Kb = K.filter(function (x) { return x[0] < tau; }), Ka = K.filter(function (x) { return x[0] >= tau; });
+      var sp = 2 * (pxLLp(Pb) + pxLLp(Pa) + pxLLp(Eb) + pxLLp(Ea) - allP), sk = 2 * (pxLLsk(Kb) + pxLLsk(Ka) - allK);
+      if (!bP || sp > bP.s) bP = { t: tau, s: sp };
+      if (!bK || sk > bK.s) bK = { t: tau, s: sk };
+    }
+    return { P: bP, K: bK };
+  }
+  function pxSplit(P, E, K) {
+    var st = pxSplitStats(P, E, K), rp = st.P ? st.P.s / PX_CP_THP : 0, rk = st.K ? st.K.s / PX_CP_THK : 0;
+    if (rp <= 1 && rk <= 1) return null;
+    return rp >= rk ? { t: st.P.t, s: st.P.s, what: 'stats' } : { t: st.K.t, s: st.K.s, what: 'skills' };
+  }
+
   function pxSumSk(a, b) { Object.keys(b).forEach(function (k) { a[k] = (a[k] || 0) + b[k]; }); return a; }
 
   // The whole archive to the extract.
@@ -350,13 +405,13 @@
           if (res.t >= p.t) { p.t = res.t; p.sq = G.sq; p.g = G.g; }
           var key = m.d + '|' + m.h + '|' + m.n, sn = null;
           p.snaps.forEach(function (x) { if (x.key === key) sn = x; });
-          if (!sn) { sn = { key: key, d: m.d, h: m.h, n: m.n, cl: m.cl, t0: res.t, t1: res.t, nb: 0, p: [], e: [], sk: {} }; p.snaps.push(sn); }
+          if (!sn) { sn = { key: key, d: m.d, h: m.h, n: m.n, cl: m.cl, t0: res.t, t1: res.t, nb: 0, p: [], e: [], sk: {}, skl: [] }; p.snaps.push(sn); }
           sn.nb++; sn.t0 = Math.min(sn.t0, res.t); sn.t1 = Math.max(sn.t1, res.t); sn.cl = m.cl;
           var o = res.obs[m.user];
           if (o) {
-            Object.keys(o.p).forEach(function (k) { sn.p.push(o.p[k]); });
-            Object.keys(o.e).forEach(function (k) { sn.e.push(o.e[k]); });
-            pxSumSk(sn.sk, o.sk);
+            Object.keys(o.p).forEach(function (k) { sn.p.push(o.p[k].slice(0, 3).concat([res.t])); });
+            Object.keys(o.e).forEach(function (k) { sn.e.push(o.e[k].slice(0, 3).concat([res.t])); });
+            pxSumSk(sn.sk, o.sk); sn.skl.push([res.t, o.sk]);
           }
         });
       });
@@ -373,12 +428,14 @@
       if (r.t >= p.t) p.t = r.t;
       var key = 'duel|' + f.d + '|' + f.h + '|' + f.n, sn = null;
       p.snaps.forEach(function (x) { if (x.key === key) sn = x; });
-      if (!sn) { sn = { key: key, duel: 1, d: f.d, h: f.h, n: f.n, cl: null, t0: r.t, t1: r.t, nb: 0, p: [], e: [], sk: {}, c: f.c }; p.snaps.push(sn); }
+      if (!sn) { sn = { key: key, duel: 1, d: f.d, h: f.h, n: f.n, cl: null, t0: r.t, t1: r.t, nb: 0, p: [], e: [], sk: {}, skl: [], c: f.c }; p.snaps.push(sn); }
       sn.nb++; sn.t0 = Math.min(sn.t0, r.t); sn.t1 = Math.max(sn.t1, r.t);
       if (q && r.o.e > 0 && r.o.p > 0) {
-        sn.p.push([r.o.e, q[0], q[1]]);
-        sn.e.push([r.o.p, Math.max(0, q[3] - q[2]), q[3]]);
+        sn.p.push([r.o.e, q[0], q[1], r.t]);
+        sn.e.push([r.o.p, Math.max(0, q[3] - q[2]), q[3], r.t]);
         var s = Array.isArray(f.s) ? f.s : [0, 0, 0, 0];
+        var skd = { L: q[0], dot: Math.round(s[0] * (q[1] + 4) / 100), focus: Math.round(s[1] * (q[1] + 4) / 100), stunT: q[0], stun: Math.round(s[2] * (q[1] + 4) / 100), blkT: q[2], blk: Math.round(s[3] * (q[2] + 4) / 100) };
+        sn.skl.push([r.t, skd]);
         pxSumSk(sn.sk, { L: q[0], dot: Math.round(s[0] * (q[1] + 4) / 100), focus: Math.round(s[1] * (q[1] + 4) / 100), stunT: q[0], stun: Math.round(s[2] * (q[1] + 4) / 100), blkT: q[2], blk: Math.round(s[3] * (q[2] + 4) / 100) });
       }
     });
@@ -391,17 +448,24 @@
       if (!p.snaps.length) return;
       p.snaps.sort(function (x, y) { return x.t1 - y.t1; });
       var sq = p.snaps.filter(function (x) { return !x.duel; }), last = (sq.length ? sq : p.snaps)[(sq.length ? sq : p.snaps).length - 1];
-      function fitOf(which, list) { var all = []; list.forEach(function (x) { all = all.concat(x[which]); }); return pxFit(all); }
-      var pL = fitOf('p', [last]), eL = fitOf('e', [last]), mixed = 0;
-      var pA = fitOf('p', p.snaps), eA = fitOf('e', p.snaps);
-      var pp = pL && pL.info >= 6 ? pL : pA, ee = eL && eL.info >= 6 ? eL : eA;
-      if (pp !== pL || ee !== eL) mixed = p.snaps.length > 1 ? 1 : 0;
-      var skk = {}; p.snaps.forEach(function (x) { pxSumSk(skk, x.sk); });
+      function cat(which, list) { var all = []; list.forEach(function (x) { all = all.concat(x[which] || []); }); return all; }
+      var pL = pxFit(cat('p', [last])), eL = pxFit(cat('e', [last])), mixed = 0;
+      var useLast = !!(pL && pL.info >= 6 && eL && eL.info >= 6);
+      var used = useLast ? [last] : p.snaps;
+      if (!useLast && p.snaps.length > 1) mixed = 1;
+      // A hidden change inside the fights used: keep only those after it.
+      var oP = cat('p', used), oE = cat('e', used), oK = cat('skl', p.snaps), chg = pxSplit(oP, oE, oK);
+      if (chg) {
+        oP = oP.filter(function (o) { return o[3] >= chg.t; }); oE = oE.filter(function (o) { return o[3] >= chg.t; });
+        oK = oK.filter(function (x) { return x[0] >= chg.t; });
+      }
+      var pp = pxFit(oP), ee = pxFit(oE);
+      var skk = {}; oK.forEach(function (x) { pxSumSk(skk, x[1]); });
       var sk = skk.L || skk.blkT ? pxSkills({ L: skk.L || 0, dot: skk.dot || 0, focus: skk.focus || 0, stunT: skk.stunT || 0, stun: skk.stun || 0, blkT: skk.blkT || 0, blk: skk.blk || 0 }) : null;
       var cl = last.cl;
       if (!cl && last.c) cl = last.c.map(function (c) { return [c[0], c[1], c[2]]; });
       function r3(f) { return f ? [Math.round(f.v), Math.round(f.se * 1000) / 1000, f.n] : null; }
-      out.push({ bt: last.t0, bl: last.t1, name: u, sq: p.sq, g: p.g || 0, own: ownNames[u] || p.sq === own ? 1 : 0, t: p.t, nb: p.nb, nd: p.nd, snaps: p.snaps.length, mixed: mixed,
+      out.push({ bt: chg ? Math.max(chg.t, last.t0) : last.t0, bl: last.t1, chg: chg ? chg.t : 0, name: u, sq: p.sq, g: p.g || 0, own: ownNames[u] || p.sq === own ? 1 : 0, t: p.t, nb: p.nb, nd: p.nd, snaps: p.snaps.length, mixed: mixed,
         d: last.d, h: last.h, n: last.n, cl: cl || [[0, 0, 0]], P: r3(pp), E: r3(ee), sk: sk ? sk.s : null, skc: sk ? sk.conf : 0, skn: sk ? sk.n : 0 });
     });
     out.sort(function (x, y) { return y.t - x.t; });

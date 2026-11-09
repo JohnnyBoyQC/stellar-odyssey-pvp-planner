@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PvP Build Planner (beta)</title>
-<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.4.6">
+<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.4.7">
 </head>
 <body>
 <script>
 (function () {
   'use strict';
-  var PAGE_VER = "1.4.6";
+  var PAGE_VER = "1.4.7";
   var GRAB_SRC = "(function () {\nif (window.__sopvpGrab) { window.__sopvpGrab.show(); return; }\nvar PL = 'https://johnnyboyqc.github.io/stellar-odyssey-pvp-planner/', OR = 'https://johnnyboyqc.github.io';\nvar G = { squad: {}, roster: null, duels: {}, box: null };\nvar RE = /\\/api\\/squadrons\\/(battlelog|groups)(\\?|$)/;\nfunction abs(u) { try { return new URL(String((u && u.href) || u), location.href).href; } catch (e) { return String(u); } }\nfunction take(url, text) {\nvar b;\ntry { b = JSON.parse(text); } catch (e) { return; }\nif (/battlelog/.test(url)) (b && b.battles || []).forEach(function (x) { if (x && x._id && Array.isArray(x.logs)) G.squad[x._id] = x; });\nelse G.roster = { t: Date.now(), body: text };\ndraw();\n}\nvar XP = XMLHttpRequest.prototype, oO = XP.open, oS = XP.send;\nXP.open = function (m, u) { try { this.__sopvpG = abs(u); } catch (e) {} return oO.apply(this, arguments); };\nXP.send = function () {\nvar x = this;\ntry {\nif (RE.test(x.__sopvpG || '')) x.addEventListener('load', function () {\ntry {\nif (x.status < 200 || x.status >= 300) return;\nvar t = (x.responseType === '' || x.responseType === 'text') ? x.responseText : (x.responseType === 'json' ? JSON.stringify(x.response) : null);\nif (t) take(x.responseURL || x.__sopvpG, t);\n} catch (e) {}\n});\n} catch (e) {}\nreturn oS.apply(this, arguments);\n};\nvar oF = window.fetch;\nif (typeof oF === 'function') window.fetch = function (i) {\nvar p = oF.apply(this, arguments);\ntry {\nvar u = abs(typeof i === 'string' ? i : (i && i.url));\nif (RE.test(u)) p.then(function (r) { if (r.ok) r.clone().text().then(function (t) { take(r.url || u, t); }, function () {}); }, function () {});\n} catch (e) {}\nreturn p;\n};\nfunction state() {\ntry {\nvar el = document.querySelector('#q-app') || document.querySelector('#app'), a = el && el.__vue_app__;\nvar p = a && a.config && a.config.globalProperties && a.config.globalProperties.$pinia;\nreturn p && p.state && p.state.value;\n} catch (e) { return null; }\n}\nfunction copy(o) { try { return JSON.parse(JSON.stringify(o)); } catch (e) { return null; } }\nfunction tick() {\nvar st = state();\nif (!st) return;\ntry {\nvar A = st.PvPArenaStore, d = A && A.currentDuel;\nif (d && d._id && d.logs && d.logs.length && !G.duels[d._id]) { G.duels[d._id] = copy(d); draw(); }\nvar s = st.squadronStore;\nif (!G.roster && s && s.group1 && s.group1.length) { G.roster = { t: Date.now(), body: JSON.stringify({ squad: [{ group1: copy(s.group1), group2: copy(s.group2 || []), group3: copy(s.group3 || []), available: [] }] }) }; draw(); }\n} catch (e) {}\n}\nsetInterval(tick, 1000);\nfunction build(st) {\ntry {\nvar U = st.UserStore, P = U.player, mats = {};\n(P.pvp_gear || []).forEach(function (g) { mats[String(g.statCost || '').toLowerCase()] = 1; });\nvar slots = (st.PetsStore && st.PetsStore.petSlots) || [], inSlot = {};\nslots.forEach(function (x) { if (x && x.pet) inSlot[x.pet] = 1; });\nreturn {\nUserStore: { username: U.username, pvp_badges: U.pvp_badges, player: copy({ pvp_gear: P.pvp_gear, pvpstats: P.pvpstats, clones: P.clones }) },\nCraftStore: { crafting_level: st.CraftStore && st.CraftStore.crafting_level },\nMaterialsStore: { materialsList: ((st.MaterialsStore && st.MaterialsStore.materialsList) || []).filter(function (m) { var n = m && m.item && (m.item.name || m.item); return n && mats[String(n).toLowerCase()]; }).map(function (m) { return { item: { name: m.item.name || m.item }, quantity: m.quantity }; }) },\nPetsStore: { petSlots: slots.filter(function (x) { return x && x.pet; }).map(function (x) { return { pet: x.pet }; }), pets: ((st.PetsStore && st.PetsStore.pets) || []).filter(function (p) { return p && inSlot[p._id] && p.name === 'Velari'; }).map(function (p) { return { _id: p._id, name: p.name, level: p.level }; }) }\n};\n} catch (e) { return null; }\n}\nfunction payload() {\nvar st = state();\nreturn { app: 'PvP Planner button', v: 1, made: Date.now(), me: st && st.UserStore ? st.UserStore.username : null, build: st ? build(st) : null,\nsquad: Object.keys(G.squad).map(function (k) { return { battle: G.squad[k] }; }),\nduel: Object.keys(G.duels).map(function (k) { return { duel: G.duels[k], saved: Date.now() }; }),\nroster: G.roster ? [G.roster] : [] };\n}\nfunction send() {\nvar nonce = String(Math.random()).slice(2), w = window.open(PL + '#wait=' + nonce, '_blank');\nif (!w) { alert(L.p); return; }\nwindow.addEventListener('message', function on(e) {\nif (e.origin !== OR || !e.data || e.data.sopvpReady !== nonce || !e.source) return;\nwindow.removeEventListener('message', on);\ne.source.postMessage({ sopvpRaw: payload(), nonce: nonce }, OR);\n});\n}\nvar L = (function () {\nvar n = String((navigator.languages && navigator.languages[0]) || navigator.language || 'en').toLowerCase();\nvar T = {\nes: { b: 'batallas de escuadrón', d: 'duelos de arena', r: 'plantilla', y: 'sí', n: 'todavía no', h: 'Ahora recorre Registro de peleas › Escuadrón (50 por página, todas las páginas), abre Grupos de escuadrón y pulsa Ver pelea en tus duelos de arena. Deja esta pestaña abierta.', s: 'Enviar al planificador ↗', p: 'El navegador bloqueó la pestaña nueva: permite las ventanas emergentes de este sitio y vuelve a pulsar Enviar.' },\nzh: { b: '场舰队战斗', d: '场竞技场决斗', r: '名单', y: '已有', n: '还没有', h: '现在浏览 战斗日志 › 舰队（每页 50 条，每一页都看），打开舰队编组，并在竞技场决斗上点击查看战斗。请保持此标签页打开。', s: '发送到规划器 ↗', p: '浏览器拦截了新标签页：请允许本网站弹出窗口后再点一次发送。' },\nen: { b: 'squadron battles', d: 'arena duels', r: 'roster', y: 'yes', n: 'not yet', h: 'Now browse Battle Log › Squadron (50 per page, every page), open Squadron Groups, and click View battle on your arena duels. Keep this tab open.', s: 'Send to planner ↗', p: 'The browser blocked the new tab: allow pop-ups for this site, then click Send again.' }\n};\nreturn T[n.indexOf('es') === 0 ? 'es' : (n.indexOf('zh') === 0 ? 'zh' : 'en')];\n})();\nfunction draw() {\nif (!G.box) return;\nvar n = Object.keys(G.squad).length, d = Object.keys(G.duels).length;\nG.box.querySelector('.c').textContent = n + ' ' + L.b + ', ' + d + ' ' + L.d + ', ' + L.r + ': ' + (G.roster ? L.y : L.n);\n}\nfunction show() {\nif (G.box) { G.box.style.display = 'block'; return; }\nvar b = document.createElement('div');\nb.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;background:#1a2129;color:#d5dde6;border:1px solid #4fb3e8;border-radius:10px;padding:10px 12px;font:13px sans-serif;max-width:300px;box-shadow:0 4px 16px rgba(0,0,0,.4)';\nb.innerHTML = '<b>PvP Planner<\/b> <span style=\"float:right;cursor:pointer\" class=\"x\">✕<\/span><div class=\"c\" style=\"margin:6px 0\"><\/div>' +\n'<div class=\"h\" style=\"font-size:11px;color:#9aa8b6;margin-bottom:8px\"><\/div>' +\n'<button class=\"s\" style=\"background:#4fb3e8;color:#0d1b24;border:0;border-radius:7px;padding:6px 12px;font-weight:600;cursor:pointer\"><\/button>';\nb.querySelector('.s').textContent = L.s;\nb.querySelector('.h').textContent = L.h;\nb.querySelector('.x').onclick = function () { b.style.display = 'none'; };\nb.querySelector('.s').onclick = send;\ndocument.body.appendChild(b);\nG.box = b; draw();\n}\nwindow.__sopvpGrab = { show: show, data: G };\ntick(); show();\n})();";
 
   /* ============================================================
@@ -181,6 +181,7 @@
       'Group {0}': 'Grupo {0}',
       '(empty)': '(vacío)',
       'Bench': 'Reserva',
+      'Hidden build change found around {0}: their hit rate, dodge rate or skills jumped while damage, health and clones stayed the same. Only fights after it are used.': 'Cambio de build oculto hacia {0}: su tasa de acierto, de esquiva o sus habilidades saltaron sin cambiar daño, salud ni clones. Solo se usan las peleas posteriores.',
       'estimated from {0} shots ({1}{2}%)': 'estimado de {0} disparos ({1}{2}%)',
       'not enough fights yet': 'aún no hay suficientes peleas',
       'crit {0}%, crit damage +{1}%, dual shot {2}%': 'crítico {0}%, daño crítico +{1}%, disparo doble {2}%',
@@ -476,6 +477,7 @@
       'Group {0}': '小队 {0}',
       '(empty)': '（空）',
       'Bench': '替补',
+      'Hidden build change found around {0}: their hit rate, dodge rate or skills jumped while damage, health and clones stayed the same. Only fights after it are used.': '在 {0} 前后发现隐藏的配置变化：其命中率、闪避率或技能突然改变，而伤害、生命和克隆体没有变。只使用此后的战斗。',
       'estimated from {0} shots ({1}{2}%)': '根据 {0} 次射击估算（{1}{2}%）',
       'not enough fights yet': '战斗还不够多',
       'crit {0}%, crit damage +{1}%, dual shot {2}%': '暴击 {0}%，暴击伤害 +{1}%，双发 {2}%',
@@ -1082,6 +1084,61 @@
     return { s: best.s, conf: Math.round(best.w / tot * 100) / 100, n: k.L + k.blkT };
   }
 
+  // ---- hidden build changes (1.4.7) ----
+  // A player who moves points between precision and evasion, or swaps
+  // skills, keeps the same damage, health and clones, so the snapshot key
+  // does not see it. Their fights are split at the time that best explains
+  // a jump in their hit rate and the rate they are missed (one test), or in
+  // their DoT, Stun and Block rates (another test). A split is kept only
+  // when its log-likelihood gain (x2) passes that test's threshold, set from
+  // the no-change spread in cp_test.js (about 2 false alarms in 100 players
+  // with no change, for each test). Each observation carries its fight time.
+  var PX_CP_THP = 14, PX_CP_THK = 14, PX_CP_MIN = 60, PX_CP_SPLITS = 40;
+  function pxLLp(obs) {
+    if (!obs.length) return 0;
+    var f = pxFit(obs);
+    if (!f) return 0;
+    var ll = 0;
+    obs.forEach(function (o) { ll += pxLogBin(o[1], o[2], f.v / (f.v + o[0])); });
+    return ll;
+  }
+  function pxLLsk(list) {
+    var k = {};
+    list.forEach(function (x) { pxSumSk(k, x[1]); });
+    var ll = 0;
+    [['dot', 'L'], ['stun', 'stunT'], ['blk', 'blkT']].forEach(function (q) { var n = k[q[1]] || 0, x = k[q[0]] || 0; if (n > 0) ll += pxLogBin(x, n, x / n); });
+    return ll;
+  }
+  function pxTries(obs) { var n = 0; obs.forEach(function (o) { n += o[2]; }); return n; }
+  // P, E: [R, x, n, t] lists; K: [t, skill events] list. Returns the split
+  // time and its statistics, or null when nothing changed beyond chance.
+  // pxSplitStats gives the largest of each statistic, for the calibration.
+  function pxSplitStats(P, E, K) {
+    var times = {};
+    P.concat(E).forEach(function (o) { times[o[3]] = 1; });
+    K.forEach(function (x) { times[x[0]] = 1; });
+    var T = Object.keys(times).map(Number).sort(function (a, b) { return a - b; });
+    var bP = null, bK = null;
+    if (T.length < 4) return { P: bP, K: bK };
+    var allP = pxLLp(P) + pxLLp(E), allK = pxLLsk(K), step = Math.max(1, Math.floor(T.length / PX_CP_SPLITS));
+    for (var j = 1; j < T.length; j += step) {
+      var tau = T[j];
+      var Pb = P.filter(function (o) { return o[3] < tau; }), Pa = P.filter(function (o) { return o[3] >= tau; });
+      var Eb = E.filter(function (o) { return o[3] < tau; }), Ea = E.filter(function (o) { return o[3] >= tau; });
+      if (pxTries(Pb) + pxTries(Eb) < PX_CP_MIN || pxTries(Pa) + pxTries(Ea) < PX_CP_MIN) continue;
+      var Kb = K.filter(function (x) { return x[0] < tau; }), Ka = K.filter(function (x) { return x[0] >= tau; });
+      var sp = 2 * (pxLLp(Pb) + pxLLp(Pa) + pxLLp(Eb) + pxLLp(Ea) - allP), sk = 2 * (pxLLsk(Kb) + pxLLsk(Ka) - allK);
+      if (!bP || sp > bP.s) bP = { t: tau, s: sp };
+      if (!bK || sk > bK.s) bK = { t: tau, s: sk };
+    }
+    return { P: bP, K: bK };
+  }
+  function pxSplit(P, E, K) {
+    var st = pxSplitStats(P, E, K), rp = st.P ? st.P.s / PX_CP_THP : 0, rk = st.K ? st.K.s / PX_CP_THK : 0;
+    if (rp <= 1 && rk <= 1) return null;
+    return rp >= rk ? { t: st.P.t, s: st.P.s, what: 'stats' } : { t: st.K.t, s: st.K.s, what: 'skills' };
+  }
+
   function pxSumSk(a, b) { Object.keys(b).forEach(function (k) { a[k] = (a[k] || 0) + b[k]; }); return a; }
 
   // The whole archive to the extract.
@@ -1133,13 +1190,13 @@
           if (res.t >= p.t) { p.t = res.t; p.sq = G.sq; p.g = G.g; }
           var key = m.d + '|' + m.h + '|' + m.n, sn = null;
           p.snaps.forEach(function (x) { if (x.key === key) sn = x; });
-          if (!sn) { sn = { key: key, d: m.d, h: m.h, n: m.n, cl: m.cl, t0: res.t, t1: res.t, nb: 0, p: [], e: [], sk: {} }; p.snaps.push(sn); }
+          if (!sn) { sn = { key: key, d: m.d, h: m.h, n: m.n, cl: m.cl, t0: res.t, t1: res.t, nb: 0, p: [], e: [], sk: {}, skl: [] }; p.snaps.push(sn); }
           sn.nb++; sn.t0 = Math.min(sn.t0, res.t); sn.t1 = Math.max(sn.t1, res.t); sn.cl = m.cl;
           var o = res.obs[m.user];
           if (o) {
-            Object.keys(o.p).forEach(function (k) { sn.p.push(o.p[k]); });
-            Object.keys(o.e).forEach(function (k) { sn.e.push(o.e[k]); });
-            pxSumSk(sn.sk, o.sk);
+            Object.keys(o.p).forEach(function (k) { sn.p.push(o.p[k].slice(0, 3).concat([res.t])); });
+            Object.keys(o.e).forEach(function (k) { sn.e.push(o.e[k].slice(0, 3).concat([res.t])); });
+            pxSumSk(sn.sk, o.sk); sn.skl.push([res.t, o.sk]);
           }
         });
       });
@@ -1156,12 +1213,14 @@
       if (r.t >= p.t) p.t = r.t;
       var key = 'duel|' + f.d + '|' + f.h + '|' + f.n, sn = null;
       p.snaps.forEach(function (x) { if (x.key === key) sn = x; });
-      if (!sn) { sn = { key: key, duel: 1, d: f.d, h: f.h, n: f.n, cl: null, t0: r.t, t1: r.t, nb: 0, p: [], e: [], sk: {}, c: f.c }; p.snaps.push(sn); }
+      if (!sn) { sn = { key: key, duel: 1, d: f.d, h: f.h, n: f.n, cl: null, t0: r.t, t1: r.t, nb: 0, p: [], e: [], sk: {}, skl: [], c: f.c }; p.snaps.push(sn); }
       sn.nb++; sn.t0 = Math.min(sn.t0, r.t); sn.t1 = Math.max(sn.t1, r.t);
       if (q && r.o.e > 0 && r.o.p > 0) {
-        sn.p.push([r.o.e, q[0], q[1]]);
-        sn.e.push([r.o.p, Math.max(0, q[3] - q[2]), q[3]]);
+        sn.p.push([r.o.e, q[0], q[1], r.t]);
+        sn.e.push([r.o.p, Math.max(0, q[3] - q[2]), q[3], r.t]);
         var s = Array.isArray(f.s) ? f.s : [0, 0, 0, 0];
+        var skd = { L: q[0], dot: Math.round(s[0] * (q[1] + 4) / 100), focus: Math.round(s[1] * (q[1] + 4) / 100), stunT: q[0], stun: Math.round(s[2] * (q[1] + 4) / 100), blkT: q[2], blk: Math.round(s[3] * (q[2] + 4) / 100) };
+        sn.skl.push([r.t, skd]);
         pxSumSk(sn.sk, { L: q[0], dot: Math.round(s[0] * (q[1] + 4) / 100), focus: Math.round(s[1] * (q[1] + 4) / 100), stunT: q[0], stun: Math.round(s[2] * (q[1] + 4) / 100), blkT: q[2], blk: Math.round(s[3] * (q[2] + 4) / 100) });
       }
     });
@@ -1174,17 +1233,24 @@
       if (!p.snaps.length) return;
       p.snaps.sort(function (x, y) { return x.t1 - y.t1; });
       var sq = p.snaps.filter(function (x) { return !x.duel; }), last = (sq.length ? sq : p.snaps)[(sq.length ? sq : p.snaps).length - 1];
-      function fitOf(which, list) { var all = []; list.forEach(function (x) { all = all.concat(x[which]); }); return pxFit(all); }
-      var pL = fitOf('p', [last]), eL = fitOf('e', [last]), mixed = 0;
-      var pA = fitOf('p', p.snaps), eA = fitOf('e', p.snaps);
-      var pp = pL && pL.info >= 6 ? pL : pA, ee = eL && eL.info >= 6 ? eL : eA;
-      if (pp !== pL || ee !== eL) mixed = p.snaps.length > 1 ? 1 : 0;
-      var skk = {}; p.snaps.forEach(function (x) { pxSumSk(skk, x.sk); });
+      function cat(which, list) { var all = []; list.forEach(function (x) { all = all.concat(x[which] || []); }); return all; }
+      var pL = pxFit(cat('p', [last])), eL = pxFit(cat('e', [last])), mixed = 0;
+      var useLast = !!(pL && pL.info >= 6 && eL && eL.info >= 6);
+      var used = useLast ? [last] : p.snaps;
+      if (!useLast && p.snaps.length > 1) mixed = 1;
+      // A hidden change inside the fights used: keep only those after it.
+      var oP = cat('p', used), oE = cat('e', used), oK = cat('skl', p.snaps), chg = pxSplit(oP, oE, oK);
+      if (chg) {
+        oP = oP.filter(function (o) { return o[3] >= chg.t; }); oE = oE.filter(function (o) { return o[3] >= chg.t; });
+        oK = oK.filter(function (x) { return x[0] >= chg.t; });
+      }
+      var pp = pxFit(oP), ee = pxFit(oE);
+      var skk = {}; oK.forEach(function (x) { pxSumSk(skk, x[1]); });
       var sk = skk.L || skk.blkT ? pxSkills({ L: skk.L || 0, dot: skk.dot || 0, focus: skk.focus || 0, stunT: skk.stunT || 0, stun: skk.stun || 0, blkT: skk.blkT || 0, blk: skk.blk || 0 }) : null;
       var cl = last.cl;
       if (!cl && last.c) cl = last.c.map(function (c) { return [c[0], c[1], c[2]]; });
       function r3(f) { return f ? [Math.round(f.v), Math.round(f.se * 1000) / 1000, f.n] : null; }
-      out.push({ bt: last.t0, bl: last.t1, name: u, sq: p.sq, g: p.g || 0, own: ownNames[u] || p.sq === own ? 1 : 0, t: p.t, nb: p.nb, nd: p.nd, snaps: p.snaps.length, mixed: mixed,
+      out.push({ bt: chg ? Math.max(chg.t, last.t0) : last.t0, bl: last.t1, chg: chg ? chg.t : 0, name: u, sq: p.sq, g: p.g || 0, own: ownNames[u] || p.sq === own ? 1 : 0, t: p.t, nb: p.nb, nd: p.nd, snaps: p.snaps.length, mixed: mixed,
         d: last.d, h: last.h, n: last.n, cl: cl || [[0, 0, 0]], P: r3(pp), E: r3(ee), sk: sk ? sk.s : null, skc: sk ? sk.conf : 0, skn: sk ? sk.n : 0 });
     });
     out.sort(function (x, y) { return y.t - x.t; });
@@ -1974,6 +2040,7 @@
     var h = sect(t('Estimated build of {0}', [p.name])) + tbl([t('Stat'), t('Value'), t('How sure')], rows);
     h += line(t('Last fight: {0}. These numbers since: {1}. From {2} squadron battles and {3} duels.', [whenTxt(p.bl || p.t), whenTxt(p.bt || p.t), p.nb || 0, p.nd || 0]), vsOld(p.bl || p.t) ? 'warn' : 'mu');
     if (vsOld(p.bl || p.t)) h += line(t('Old: the last fight with this player is more than 7 days ago, their build may have changed.'), 'warn');
+    if (p.chg) h += line(t('Hidden build change found around {0}: their hit rate, dodge rate or skills jumped while damage, health and clones stayed the same. Only fights after it are used.', [whenTxt(p.chg)]), 'warn');
     if (p.mixed) h += line(t('Their damage, health or clones changed since older fights: precision and evasion also use fights from before the change, because the new build has too few yet.'), 'warn');
     h += line(t('Precision and evasion are worked out from how often they hit our members and how often our members missed them, against our members\' exact stats: the best fit to every shot in the logs. More fights make the ± smaller.'), 'mu');
     return h;
