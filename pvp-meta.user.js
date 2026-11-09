@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stellar Odyssey – PvP Meta
 // @namespace    stellarodyssey-pvpmeta
-// @version      1.3.6
+// @version      1.3.7
 // @description  Arena build planner for Stellar Odyssey: the meta split at your own total stat, the best free re-spec, which upgrades pay, and a record of your duels. Built from Astrolabe 3.22.9's simulator. Keeps the squadron battles, arena duels and roster you browse, and opens them in the web planner in one click (player and squadron picker). Reads the page only: no network requests, no game actions.
 // @match        *://steam.stellarodyssey.app/*
 // @grant        GM_getValue
@@ -814,9 +814,16 @@
   function plPayload() {
     var st = recState() || S.storeState, me = st && st.UserStore && st.UserStore.username, pv = st ? readPvp(st) : null;
     var get = function (s) { return arcTx(s, 'readonly', function (os) { return os.getAll(); }).catch(function () { return []; }); };
-    return Promise.all([get('squad'), get('duel'), get('roster')]).then(function (all) {
+    return Promise.all([get('squad'), get('duel'), get('roster'), get('duelList')]).then(function (all) {
       var mine = function (x) { return x && x.realm === REALM; };
       var squad = all[0].filter(mine), duels = all[1].filter(mine), roster = all[2].filter(mine);
+      // The Arena list rows (who won, both Elo; no log), made small.
+      var dlist = all[3].filter(mine).map(function (x) {
+        var r = x.row;
+        if (!r || !r._id || !r.attackerName || !r.defenderName) return null;
+        var w = r.winner === r.attackerName || (r.attacker && r.winner === r.attacker) ? 'a' : (r.winner === r.defenderName || (r.defender && r.winner === r.defender) ? 'd' : '');
+        return { i: String(r._id), t: (Number(r.created) || 0) * 1000, a: String(r.attackerName), d: String(r.defenderName), ae: Number(r.attackerElo) || 0, de: Number(r.defenderElo) || 0, dl: Number(r.eloDelta) || 0, w: w };
+      }).filter(Boolean);
       // Duels: the recorded ones, plus every duel opened and kept whole in
       // the archive (those carry the opponent's name, so older ones get it too).
       var seen = {};
@@ -835,7 +842,7 @@
       // raw: the battles and rosters themselves, so the page can add them up
       // with the squadron file and other imports (page 1.4.9 on).
       return { app: 'PvP Meta', v: 1, ver: scriptVersion(), realm: REALM, made: Date.now(), root: st ? plRoot(st) : null, duels: recs, x: x,
-        raw: { squad: squad.map(function (q) { return { realm: q.realm, saved: q.saved, battle: q.battle }; }), roster: roster.map(function (r) { return { t: r.t, body: r.body }; }) } };
+        raw: { squad: squad.map(function (q) { return { realm: q.realm, saved: q.saved, battle: q.battle }; }), roster: roster.map(function (r) { return { t: r.t, body: r.body }; }), dlist: dlist } };
     });
   }
 
@@ -879,7 +886,7 @@
         var url;
         if (code.length <= PL_MAX_URL) url = PLANNER_URL + '#data=' + code;
         else { var nonce = String(Math.random()).slice(2); plPending = { nonce: nonce, obj: obj }; url = PLANNER_URL + '#wait=' + nonce; }
-        PL.last = { n: obj.x.players.length, b: obj.x.battles.length, d: obj.duels.length, kb: Math.round(code.length / 1024) };
+        PL.last = { n: obj.x.players.length, b: obj.x.battles.length, d: obj.duels.length, l: obj.raw.dlist.length, kb: Math.round(code.length / 1024) };
         PL.win = w && !w.closed ? w : null;
         if (w && !w.closed) { try { w.location.replace(url); } catch (e) { PL.link = url; } }
         else PL.link = url;
@@ -894,7 +901,7 @@
     var h = '<div class="row"><button class="act" id="b_plopen"' + (PL.busy ? ' disabled' : '') + '>' + (PL.busy ? 'Preparing...' : 'Open in planner ↗') + '</button></div>';
     if (PL.link) h += '<div class="line">Your browser blocked the new tab. <a id="pl_link" href="' + esc(PL.link) + '" target="_blank"' + (/#wait=/.test(PL.link) ? '' : ' rel="noopener"') + '>Open the planner</a></div>';
     if (PL.err) h += line(PL.err, 'bad');
-    if (PL.last && !PL.busy) h += line('Sent ' + PL.last.d + ' duels and ' + PL.last.n + ' players from ' + PL.last.b + ' squadron battles (' + PL.last.kb + ' KB), inside the link only: no server sees them.', 'mu');
+    if (PL.last && !PL.busy) h += line('Sent ' + PL.last.d + ' duels, ' + PL.last.l + ' Arena list results and ' + PL.last.n + ' players from ' + PL.last.b + ' squadron battles (' + PL.last.kb + ' KB), inside the link only: no server sees them.', 'mu');
     return h;
   }
 
@@ -2257,7 +2264,7 @@
       tile('Roster', ARC.n.roster ? String(ARC.n.roster) : '--', ARC.n.roster ? 'snapshots' : 'open Squadron Groups') + '</div>';
     h += kvs([['Map snapshots', String(ARC.n.map)], ['Stored in this browser', ARC.bytes ? mbTxt(ARC.bytes) : '--'], ['Last saved', ARC.last ? whenTxt(ARC.last) : 'not this session']]);
     if (ARC.err) h += line('Archive error: ' + ARC.err, 'bad');
-    h += line('Kept as you browse: Battlefield › Battle Log (squadron battles come with their full logs; set Records per page to 50 and click through the pages once to keep them all), View battle on arena duels, Squadron Groups and the Map. It only reads what the game already shows you: it sends nothing and clicks nothing.');
+    h += line('Kept as you browse: Battlefield › Battle Log (squadron battles come with their full logs; set Records per page to 50 and click through the pages once to keep them all), Battle Log › Arena (the list of your duels: enough for opponents already seen in a squadron battle), View battle on an arena duel (its full log, for players never met in a squadron battle), Squadron Groups and the Map. It only reads what the game already shows you: it sends nothing and clicks nothing.');
     h += line('Kept whole in this browser (about 0.1 MB a squadron battle), for the player picker in the planner, squadron simulator and group builder. Nothing leaves your computer unless you download it or open the planner.', 'mu');
     h += '<div class="row"><label class="c"><input type="checkbox" id="f_arc"' + (S.inputs.archive === false ? '' : ' checked') + '>Keep battles</label></div>';
     h += '<div class="row"><button class="act" id="b_arcdl">Download archive (.json)</button><button class="act" id="b_arcclr">Clear archive</button></div>';
