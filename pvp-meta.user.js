@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stellar Odyssey – PvP Meta
 // @namespace    stellarodyssey-pvpmeta
-// @version      1.3.0
+// @version      1.3.1
 // @description  Arena build planner for Stellar Odyssey: the meta split at your own total stat, the best free re-spec, which upgrades pay, and a record of your duels. Built from Astrolabe 3.22.9's simulator. Keeps the squadron battles, arena duels and roster you browse, and opens them in the web planner in one click (player and squadron picker). Reads the page only: no network requests, no game actions.
 // @match        *://steam.stellarodyssey.app/*
 // @grant        GM_getValue
@@ -71,11 +71,11 @@
       PV_CONTESTED: PV_CONTESTED, PV_DECIDED: PV_DECIDED, PV_FLOOR: PV_FLOOR, PV_MAX_BATTLES: PV_MAX_BATTLES, PV_MIN_EACH: PV_MIN_EACH,
       PV_SEARCH_MAX: PV_SEARCH_MAX, PV_SEED: PV_SEED, PV_SIMS: PV_SIMS,
       PV_META: PV_META, PV_META_COPIES: PV_META_COPIES,
-      RL_A: RL_A, RL_B: RL_B, RL_MAX_CLONES: RL_MAX_CLONES, RL_MAX_ROUNDS: RL_MAX_ROUNDS
+      RL_A: RL_A, RL_B: RL_B, RL_MAX_CLONES: RL_MAX_CLONES, RL_MAX_ROUNDS: RL_MAX_ROUNDS, PV_CLIMB_SIMS: PV_CLIMB_SIMS
     };
   }
   function WK_FNS() {
-    return [numOr, btRng, arAssume, arDraws, arSide, pvAllocate, pvBestAssign, pvCompositions, pvCopy, pvGap, pvGearBase, pvGearVal, pvLevelCost,
+    return [numOr, btRng, arAssume, arDraws, arSide, pvAllocate, pvBestAssign, pvClimb, pvCompositions, pvCopy, pvGap, pvGearBase, pvGearVal, pvLevelCost,
       pvMetaPool, pvNeedFor, pvPlanRun, pvPool, pvPoolRef, pvReplay, pvSample, pvScore, pvScoreOf, pvSkills, pvSpend, pvTerm,
       pvTierCost, pvTotals, pvUpgradeRows, rlDuel, rlLeft, rlLoad, rlMe, rlPhase, rlSlot, rngStreams];
   }
@@ -435,6 +435,139 @@
         c: (card.cl && card.cl.length ? card.cl : [[0, 0, 0]]).map(function (c) { return [c[0], c[1], c[2]]; }),
         // [their hits, their swings, our hits on them, our swings]
         q: [qp[0], qp[1], qe[0], qe[1]] } };
+  }
+
+  /* ---- Best build: the split is settled by simulated duels ----
+     pvBestAssign's split comes from a log formula that always lands near an
+     even split (about 26/24/24/26), whoever the opponents are. pvClimb
+     starts there and moves points between stats, and a piece's stat, keeping
+     each move only when the simulated win rate against the same opponents,
+     with the same rolls, goes up: every split in tenths of the points
+     first, then steps of 1/20, 1/40 and 1/80. About 2 seconds. */
+  var PV_CLIMB_SIMS = 400;
+
+  function pvClimb(b, pool, sims, steps) {
+    var cur = pvCopy(b), P = 0;
+    PVP_STATS.forEach(function (s) { P += cur.pts[s] || 0; });
+    var sc = pvScoreOf(cur, pool, sims).score, evals = 1;
+    // A coarse look at every split in tenths of the points first, so the
+    // climb starts on the right hill.
+    var U = 10, q = Math.floor(P / U);
+    if (q > 0) for (var a = 0; a <= U; a++) for (var bb = 0; a + bb <= U; bb++) for (var c = 0; a + bb + c <= U; c++) {
+      var g = pvCopy(cur);
+      g.pts = { power: a * q, precision: bb * q, evasion: c * q, hull: P - (a + bb + c) * q };
+      var gs = pvScoreOf(g, pool, sims).score; evals++;
+      if (gs > sc + 1e-9) { sc = gs; cur = g; }
+    }
+    var sizes = (steps || [20, 40, 80]).map(function (d) { return Math.max(1, Math.round(P / d)); })
+      .filter(function (x, i, a) { return a.indexOf(x) === i; });
+    sizes.forEach(function (step, si) {
+      if (step >= q && si > 0) return;
+      for (var pass = 0; pass < 6; pass++) {
+        var best = null, bs = sc;
+        PVP_STATS.forEach(function (from) {
+          if ((cur.pts[from] || 0) < step) return;
+          PVP_STATS.forEach(function (to) {
+            if (to === from) return;
+            var c = pvCopy(cur); c.pts[from] -= step; c.pts[to] = (c.pts[to] || 0) + step;
+            var s = pvScoreOf(c, pool, sims).score; evals++;
+            if (s > bs + 1e-9) { bs = s; best = c; }
+          });
+        });
+        // On the first step size only: a piece changes stat, and the points
+        // it frees are moved back so the totals stay as close as they can.
+        if (si === 0) cur.gear.forEach(function (g, i) {
+          PVP_STATS.forEach(function (to) {
+            if (to === g.stat) return;
+            var c = pvCopy(cur), from = g.stat, v = Math.round(pvGearVal(g, cur.craft)), mv = Math.min(v, c.pts[to] || 0);
+            c.gear[i].stat = to; c.pts[to] -= mv; c.pts[from] = (c.pts[from] || 0) + mv;
+            var s = pvScoreOf(c, pool, sims).score; evals++;
+            if (s > bs + 1e-9) { bs = s; best = c; }
+          });
+        });
+        if (!best) break;
+        cur = best; sc = bs;
+      }
+    });
+    cur.climbEvals = evals;
+    return cur;
+  }
+
+  // As in Astrolabe, with the split from pvClimb instead of the formula alone.
+  function pvPlanRun(pv, recs, keepBadges, done) {
+    try {
+      var pool = pvPool(recs), synthetic = pool.length < PV_FLOOR;
+      // Too few real opponents to tune against: the meta field at the player's
+      // own total stat stands in (pvMetaPool), and the plan says so.
+      var plan = { pool: pool.length, floor: PV_FLOOR, thin: synthetic, synthetic: synthetic };
+      if (synthetic) pool = pvMetaPool(pv);
+      var ref = pvPoolRef(pool);
+      plan.ref = ref;
+      plan.cur = pvScoreOf(pv, pool);
+      plan.need = synthetic ? 0 : pvNeedFor(plan.cur.se, pool.length, 5);
+      // A fight you always win, or always lose, says nothing about which
+      // build is better: every build gets the same result. Tuning is done
+      // on the ones that could go either way.
+      var idx = [];
+      plan.cur.per.forEach(function (w, i) { if (w > PV_DECIDED && w < 1 - PV_DECIDED) idx.push(i); });
+      plan.contested = idx.length;
+      plan.decided = pool.length - idx.length;
+      var liveAll = idx.map(function (i) { return pool[i]; });   // all the contested: what the finalists are settled on
+      // The meta field is at the player's own budget, so its fights are
+      // contested by construction; should a build still settle them all,
+      // tune on the whole field rather than stop.
+      if (synthetic && idx.length < PV_CONTESTED) liveAll = pool;
+      else if (idx.length < PV_CONTESTED) { plan.stop = 1; done(plan); return; }
+      var live = pvSample(liveAll, PV_SEARCH_MAX);   // a sample of them: what the search runs on
+      plan.searched = live.length;
+
+      // The split of points and each piece's active stat from the formula...
+      var cand = pvClimb(pvBestAssign(pv, ref), live, PV_CLIMB_SIMS);
+      // ...then the skills by running the duels. Stun and Focus lose at equal
+      // budget whatever they are paired with (the self-play meta), so sets
+      // with two or more of them are not tried: 35 compositions become 13.
+      // The current skills always compete, whatever they are, so a recorded
+      // field that favours them can still keep them.
+      var curSkills = cand.gear.map(function (g) { return g.skill; }), curKey = curSkills.slice().sort().join();
+      var comps = pvCompositions(cand.gear.length).filter(function (c) {
+        return c.filter(function (s) { return s === 'stun' || s === 'focus'; }).length <= 1;
+      });
+      if (!comps.some(function (c) { return c.slice().sort().join() === curKey; })) comps.push(curSkills);
+      function withSkills(comp) { var c = pvCopy(cand); comp.forEach(function (sk, i) { c.gear[i].skill = sk; }); return c; }
+      var quick = comps.map(function (comp) { return { comp: comp, key: comp.slice().sort().join(), m: pvScoreOf(withSkills(comp), live, 120).score }; });
+      quick.sort(function (x, y) { return y.m - x.m; });
+      var short = quick.slice(0, 5);
+      if (!short.some(function (x) { return x.key === curKey; })) short.push(quick.filter(function (x) { return x.key === curKey; })[0] || quick[0]);
+      // The finalists are close together, which is exactly when a small
+      // sample misleads, and there are only six of them: settle it on
+      // every contested opponent.
+      short.forEach(function (x) { x.m = pvScoreOf(withSkills(x.comp), liveAll, 600).score; });
+      short.sort(function (x, y) { return y.m - x.m; });
+      // The winner, with the current skills kept when it is a tie, and each
+      // piece keeping its own skill where the winning set still has it.
+      var cur = short.filter(function (x) { return x.key === curKey; })[0];
+      var pick = cur && cur.m >= short[0].m - 0.8 ? cur : short[0];   // inside the noise: keep what is there
+      var left = pick.comp.slice(), out = new Array(cand.gear.length);
+      cand.gear.forEach(function (g, i) { var j = left.indexOf(g.skill); if (j >= 0) { out[i] = g.skill; left.splice(j, 1); } });
+      for (var i = 0; i < out.length; i++) if (out[i] === undefined) out[i] = left.shift();
+      cand.gear.forEach(function (g, i) { g.skill = out[i]; });
+
+      var s = pvScoreOf(cand, pool), g = pvGap(plan.cur, s);
+      plan.free = { build: cand, totals: pvTotals(cand), score: s.score, win: s.win, gain: g.gain, se: g.se, sure: g.gain > 2 * g.se };
+
+      // What each next upgrade is worth, and what the materials and badges in hand buy right now.
+      plan.base8 = pvScoreOf(pv, live, 800).score;
+      plan.next = [];
+      pv.gear.forEach(function (g, k) { ['level', 'tier'].forEach(function (kind) { plan.next = plan.next.concat(pvUpgradeRows(pv, live, plan.base8, k, kind)); }); });
+      var sp = pvSpend(pv, keepBadges);
+      plan.buy = { steps: sp.steps };
+      if (sp.steps.length) {
+        var b2 = pvCopy(pv); b2.gear = sp.gear;
+        var s2 = pvScoreOf(b2, pool), g2 = pvGap(plan.cur, s2);
+        plan.buy.score = s2.score; plan.buy.gain = g2.gain; plan.buy.se = g2.se; plan.buy.build = b2;
+      }
+      done(plan);
+    } catch (e) { done(null, e); }
   }
 
   /* ============================================================
@@ -1283,82 +1416,6 @@
     var out = [], step = n / max, i;
     for (i = 0; i < max; i++) out.push(list[Math.min(n - 1, Math.floor(i * step))]);
     return out;
-  }
-
-  function pvPlanRun(pv, recs, keepBadges, done) {
-    try {
-      var pool = pvPool(recs), synthetic = pool.length < PV_FLOOR;
-      // Too few real opponents to tune against: the meta field at the player's
-      // own total stat stands in (pvMetaPool), and the plan says so.
-      var plan = { pool: pool.length, floor: PV_FLOOR, thin: synthetic, synthetic: synthetic };
-      if (synthetic) pool = pvMetaPool(pv);
-      var ref = pvPoolRef(pool);
-      plan.ref = ref;
-      plan.cur = pvScoreOf(pv, pool);
-      plan.need = synthetic ? 0 : pvNeedFor(plan.cur.se, pool.length, 5);
-      // A fight you always win, or always lose, says nothing about which
-      // build is better: every build gets the same result. Tuning is done
-      // on the ones that could go either way.
-      var idx = [];
-      plan.cur.per.forEach(function (w, i) { if (w > PV_DECIDED && w < 1 - PV_DECIDED) idx.push(i); });
-      plan.contested = idx.length;
-      plan.decided = pool.length - idx.length;
-      var liveAll = idx.map(function (i) { return pool[i]; });   // all the contested: what the finalists are settled on
-      // The meta field is at the player's own budget, so its fights are
-      // contested by construction; should a build still settle them all,
-      // tune on the whole field rather than stop.
-      if (synthetic && idx.length < PV_CONTESTED) liveAll = pool;
-      else if (idx.length < PV_CONTESTED) { plan.stop = 1; done(plan); return; }
-      var live = pvSample(liveAll, PV_SEARCH_MAX);   // a sample of them: what the search runs on
-      plan.searched = live.length;
-
-      // The split of points and each piece's active stat from the formula...
-      var cand = pvBestAssign(pv, ref);
-      // ...then the skills by running the duels. Stun and Focus lose at equal
-      // budget whatever they are paired with (the self-play meta), so sets
-      // with two or more of them are not tried: 35 compositions become 13.
-      // The current skills always compete, whatever they are, so a recorded
-      // field that favours them can still keep them.
-      var curSkills = cand.gear.map(function (g) { return g.skill; }), curKey = curSkills.slice().sort().join();
-      var comps = pvCompositions(cand.gear.length).filter(function (c) {
-        return c.filter(function (s) { return s === 'stun' || s === 'focus'; }).length <= 1;
-      });
-      if (!comps.some(function (c) { return c.slice().sort().join() === curKey; })) comps.push(curSkills);
-      function withSkills(comp) { var c = pvCopy(cand); comp.forEach(function (sk, i) { c.gear[i].skill = sk; }); return c; }
-      var quick = comps.map(function (comp) { return { comp: comp, key: comp.slice().sort().join(), m: pvScoreOf(withSkills(comp), live, 120).score }; });
-      quick.sort(function (x, y) { return y.m - x.m; });
-      var short = quick.slice(0, 5);
-      if (!short.some(function (x) { return x.key === curKey; })) short.push(quick.filter(function (x) { return x.key === curKey; })[0] || quick[0]);
-      // The finalists are close together, which is exactly when a small
-      // sample misleads, and there are only six of them: settle it on
-      // every contested opponent.
-      short.forEach(function (x) { x.m = pvScoreOf(withSkills(x.comp), liveAll, 600).score; });
-      short.sort(function (x, y) { return y.m - x.m; });
-      // The winner, with the current skills kept when it is a tie, and each
-      // piece keeping its own skill where the winning set still has it.
-      var cur = short.filter(function (x) { return x.key === curKey; })[0];
-      var pick = cur && cur.m >= short[0].m - 0.8 ? cur : short[0];   // inside the noise: keep what is there
-      var left = pick.comp.slice(), out = new Array(cand.gear.length);
-      cand.gear.forEach(function (g, i) { var j = left.indexOf(g.skill); if (j >= 0) { out[i] = g.skill; left.splice(j, 1); } });
-      for (var i = 0; i < out.length; i++) if (out[i] === undefined) out[i] = left.shift();
-      cand.gear.forEach(function (g, i) { g.skill = out[i]; });
-
-      var s = pvScoreOf(cand, pool), g = pvGap(plan.cur, s);
-      plan.free = { build: cand, totals: pvTotals(cand), score: s.score, win: s.win, gain: g.gain, se: g.se, sure: g.gain > 2 * g.se };
-
-      // What each next upgrade is worth, and what the materials and badges in hand buy right now.
-      plan.base8 = pvScoreOf(pv, live, 800).score;
-      plan.next = [];
-      pv.gear.forEach(function (g, k) { ['level', 'tier'].forEach(function (kind) { plan.next = plan.next.concat(pvUpgradeRows(pv, live, plan.base8, k, kind)); }); });
-      var sp = pvSpend(pv, keepBadges);
-      plan.buy = { steps: sp.steps };
-      if (sp.steps.length) {
-        var b2 = pvCopy(pv); b2.gear = sp.gear;
-        var s2 = pvScoreOf(b2, pool), g2 = pvGap(plan.cur, s2);
-        plan.buy.score = s2.score; plan.buy.gain = g2.gain; plan.buy.se = g2.se; plan.buy.build = b2;
-      }
-      done(plan);
-    } catch (e) { done(null, e); }
   }
 
   function pvReplay(rec, sims) {
