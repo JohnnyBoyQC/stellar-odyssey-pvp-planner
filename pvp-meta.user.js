@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         Stellar Odyssey – PvP Meta
 // @namespace    stellarodyssey-pvpmeta
-// @version      1.0.1
-// @description  Arena build planner for Stellar Odyssey: the meta split at your own total stat, the best free re-spec, which upgrades pay, and a record of your duels. Built from Astrolabe 3.22.7's simulator. Reads the page only: no network requests, no game actions.
+// @version      1.1.0
+// @description  Arena build planner for Stellar Odyssey: the meta split at your own total stat, the best free re-spec, which upgrades pay, and a record of your duels. Built from Astrolabe 3.22.8's simulator. Also keeps the squadron battles, arena duels and roster you browse, for the squadron tools to come. Reads the page only: no network requests, no game actions.
 // @match        *://steam.stellarodyssey.app/*
 // @grant        GM_getValue
 // @grant        GM_setValue
-// @run-at       document-idle
+// @run-at       document-start
 // @homepageURL  https://github.com/JohnnyBoyQC/stellar-odyssey-pvp-planner
 // @downloadURL  https://raw.githubusercontent.com/JohnnyBoyQC/stellar-odyssey-pvp-planner/main/pvp-meta.user.js
 // @updateURL    https://raw.githubusercontent.com/JohnnyBoyQC/stellar-odyssey-pvp-planner/main/pvp-meta.user.js
@@ -49,7 +49,8 @@
   var PVP_DEFAULTS = {
     recBattles: true,   // record arena duels as they are fought or opened
     keepBadges: 0,      // PvP badges the upgrade plan must leave untouched
-    bestGap: 2          // floor on the gain worth a change; the real bar is twice the error bar
+    bestGap: 2,         // floor on the gain worth a change; the real bar is twice the error bar
+    archive: true       // keep squadron battles, arena duels, roster and map as they are browsed
   };
 
   var S = {
@@ -103,7 +104,7 @@
   }
 
   /* ============================================================
-     FROM ASTROLABE 3.22.7 (copied unchanged by the build step)
+     FROM ASTROLABE 3.22.8 (copied unchanged by the build step)
      ============================================================ */
 
   var AR_MAX = 200;
@@ -376,13 +377,46 @@
   function arRound1(x) { return Math.round(x * 10) / 10; }
 
   function arDamage(vals) {
-    if (!vals.length) return { base: 0, crit: 0, cm: 1.3 };
+    var none = { base: 0, crit: 0, cm: 1.3, dual: 0 };
+    if (!vals.length) return none;
     var base = Infinity;
     vals.forEach(function (v) { var k = Math.round(v); if (k > 0 && k < base) base = k; });
-    if (!isFinite(base)) return { base: 0, crit: 0, cm: 1.3 };
-    var hi = vals.filter(function (v) { return v > base * 1.02; });
-    var sum = 0; hi.forEach(function (v) { sum += v; });
-    return { base: base, crit: arRound1(hi.length / vals.length * 100), cm: hi.length ? arRound1(sum / hi.length / base * 100) / 100 : 1.3 };
+    if (!isFinite(base)) return none;
+    var r = vals.map(function (v) { return v / base; }), TOL = 0.006;
+    function near(x, y) { return Math.abs(x - y) <= y * TOL; }
+    // [factor, crit shots, dual] for one line, or null when c does not explain it
+    function read(x, c) {
+      if (near(x, 1)) return [0, 0];
+      if (near(x, 2)) return [0, 1];
+      if (near(x, c)) return [1, 0];
+      if (near(x, 1 + c)) return [1, 1];
+      if (near(x, 2 * c)) return [2, 1];
+      return null;
+    }
+    var bestC = 1.3, bestN = -1;
+    for (var c = 1.30; c <= 3.5; c += 0.002) {
+      if (Math.abs(c - 2) < 0.02) continue;   // a crit of x2 cannot be told from a dual shot
+      var n = 0;
+      for (var i = 0; i < r.length; i++) if (read(r[i], c)) n++;
+      if (n > bestN) { bestN = n; bestC = c; }
+    }
+    // The grid step leaves c a little off: take the average c the crit
+    // lines themselves imply.
+    var cs = 0, cn = 0;
+    r.forEach(function (x) {
+      var k = read(x, bestC);
+      if (!k || !k[0]) return;
+      cs += k[0] === 2 ? x / 2 : (k[1] ? x - 1 : x); cn++;
+    });
+    if (cn) bestC = cs / cn;
+    var lines = 0, shots = 0, crits = 0, duals = 0;
+    r.forEach(function (x) {
+      var k = read(x, bestC);
+      if (!k) return;
+      lines++; shots += 1 + k[1]; crits += k[0]; duals += k[1];
+    });
+    if (!lines) return { base: base, crit: 0, cm: 1.3, dual: 0 };
+    return { base: base, crit: arRound1(crits / shots * 100), cm: crits ? Math.round(bestC * 1000) / 1000 : 1.3, dual: arRound1(duals / lines * 100), lines: lines, duals: duals };
   }
 
   function arBuild(duel, me, pv, nowMs) {
@@ -406,12 +440,15 @@
         if (e.action === 'attacks' || e.action === 'misses hit on' || e.action === 'attack blocked') {
           if (first === null) first = ao;
           A.att++;
-          if (e.action === 'attacks') { A.hit++; var v = numOr(e.value); if (v !== null && v > 0) A.dmg.push(v); }
+          if (e.action === 'attacks') {
+            A.hit++;
+            // a killing blow is capped at the health left, so it says nothing about the hit
+            var v = numOr(e.value), hl = arHp(e.hpLeft);
+            if (v !== null && v > 0 && !(hl && hl.hp <= 0)) A.dmg.push(v);
+          }
           else if (e.action === 'attack blocked') { A.hit++; get(dO || ao).blocked++; }
           else A.miss++;
-          // two swings from the same clone in the same round is a dual shot
-          var key = e.round + '|' + e.attacker;
-          if (A.seen[key]) A.dual++; else A.seen[key] = 1;
+          // A dual shot is one log line holding both shots; arDamage reads it.
         } else if (e.action === 'applies DoT') A.dot++;
         else if (e.action === 'stuns') A.stun++;
         else if (e.action === 'focused') A.focus++;
@@ -437,9 +474,19 @@
         function pc(x, n) { return Math.min(60, arRound1(x / (n + 4) * 100)); }
         return [pc(s.dot, s.att), pc(s.focus, s.att), pc(s.stun, s.att), pc(s.blocked, other.hit + 0)];
       }
+      // The log shows a dual line only when the second shot also lands
+      // unblocked, so the stat is the share seen divided by that chance,
+      // pulled towards a typical 35% while there are few lines to go on (as
+      // if 30 lines at 35% had been seen) and capped at 60%, above anything
+      // seen live.
+      function dualStat(s, other, dmg) {
+        var p2 = Math.max(0.05, (s.hit - other.blocked) / Math.max(1, s.att)), K = 30;
+        if (!dmg.lines) return 0;
+        return arRound1(Math.min(60, (dmg.duals + 0.35 * p2 * K) / (p2 * (dmg.lines + K)) * 100));
+      }
       function fighter(s, other, dmg, p, e) {
         return { n: s.n, d: dmg.base, h: s.max, p: p, e: e,
-          s: skills(s, other), c: [[dmg.crit, arRound1((dmg.cm - 1) * 100 - 30), arRound1(s.dual / Math.max(1, s.att) * 100)]],
+          s: skills(s, other), c: [[dmg.crit, arRound1((dmg.cm - 1) * 100 - 30), dualStat(s, other, dmg)]],
           x: s.out || 0,
           // how the hit counts came out, so a later reader can tell a
           // precision read off 12 swings from one read off 120
@@ -549,39 +596,38 @@
   }
 
   function rlPhase(a, d, R) {
-    var S = a.S, T = d.S, n = a.alive ? S.N : 0, i, s, shots, cl, t, k, pick, dmg, base, rHit, rBlock, rCrit, rDot, rStun, rFocus;
+    var S = a.S, T = d.S, n = a.alive ? S.N : 0, i, dual, cl, t, k, pick, dmg, base, rHit, rBlock, rCrit, rCrit2, rDot, rStun, rFocus, rHit2, rBlock2;
     for (i = 0; i < n; i++) {
       if (d.alive <= 0) return;
       if (a.hp[i] <= 0) continue;
       if (a.st[i]) { a.st[i] = 0; continue; }
       cl = S.cl[i % S.cl.length];
-      shots = R.dual() < cl.dual ? 2 : 1;
-      for (s = 0; s < shots && d.alive > 0; s++) {
-        pick = Math.floor(R.pick() * d.alive);
-        rHit = R.hit(); rBlock = R.block(); rCrit = R.crit(); rDot = R.dot(); rStun = R.stun(); rFocus = R.focus();
-        if (d.mark >= 0 && d.hp[d.mark] > 0) t = d.mark;
-        else {
-          t = -1;
-          for (k = 0; k < T.N; k++) if (d.hp[k] > 0) { if (pick === 0) { t = k; break; } pick--; }
-        }
-        if (rHit >= S.prec / (S.prec + T.eva)) continue;
-        if (T.sk.block > 0 && rBlock < T.sk.block) continue;
-        base = S.dmg;
-        dmg = base * (rCrit < cl.crit ? cl.cm : 1);
-        if (d.ch[t] > 0) { d.ch[t]--; dmg += base * 0.5; }
-        d.hp[t] -= dmg;
-        if (d.hp[t] <= 0) { d.alive--; if (d.mark === t) d.mark = -1; }
-        else {
-          if (S.sk.dot > 0 && rDot < S.sk.dot) {
-            d.ch[t] = 2; d.hp[t] -= base * 0.5;
-            if (d.hp[t] <= 0) { d.alive--; if (d.mark === t) d.mark = -1; }
-          }
-          if (d.hp[t] > 0) {
-            if (S.sk.stun > 0 && !d.st[t] && rStun < S.sk.stun) d.st[t] = 1;
-            if (S.sk.focus > 0 && d.mark < 0 && rFocus < S.sk.focus) d.mark = t;
-          }
-        }
+      dual = R.dual() < cl.dual;
+      pick = Math.floor(R.pick() * d.alive);
+      rHit = R.hit(); rBlock = R.block(); rCrit = R.crit(); rCrit2 = R.crit2(); rDot = R.dot(); rStun = R.stun(); rFocus = R.focus();
+      rHit2 = R.hit2(); rBlock2 = R.block2();
+      // The second shot of a dual rolls its own hit and block: dual-shot
+      // lines run at the stated chance x the shooter's hit rate x (1 -
+      // block), 512 seen for 507 predicted over 38 players (live, 2026-11-08).
+      if (dual && (rHit2 >= S.prec / (S.prec + T.eva) || (T.sk.block > 0 && rBlock2 < T.sk.block))) dual = false;
+      if (d.mark >= 0 && d.hp[d.mark] > 0) t = d.mark;
+      else {
+        t = -1;
+        for (k = 0; k < T.N; k++) if (d.hp[k] > 0) { if (pick === 0) { t = k; break; } pick--; }
       }
+      if (rHit >= S.prec / (S.prec + T.eva)) continue;
+      base = S.dmg;
+      if (S.sk.focus > 0 && d.mark < 0 && rFocus < S.sk.focus) d.mark = t;
+      if (S.sk.dot > 0 && rDot < S.sk.dot) d.ch[t] = 3;
+      if (d.ch[t] > 0) {
+        d.ch[t]--; d.hp[t] -= Math.floor(base * 0.5);
+        if (d.hp[t] <= 0) { d.alive--; if (d.mark === t) d.mark = -1; continue; }
+      }
+      if (T.sk.block > 0 && rBlock < T.sk.block) continue;
+      dmg = Math.floor(base * ((rCrit < cl.crit ? cl.cm : 1) + (dual ? (rCrit2 < cl.crit ? cl.cm : 1) : 0)));
+      d.hp[t] -= dmg;
+      if (d.hp[t] <= 0) { d.alive--; if (d.mark === t) d.mark = -1; }
+      else if (S.sk.stun > 0 && !d.st[t] && rStun < S.sk.stun) d.st[t] = 1;
     }
   }
 
@@ -594,7 +640,7 @@
 
   function rlDuel(SA, SB, aFirst, seed) {
     var A = RL_A, B = RL_B, first, second, r;
-    var R = rngStreams(seed, ['dual', 'pick', 'hit', 'block', 'crit', 'dot', 'stun', 'focus']);
+    var R = rngStreams(seed, ['dual', 'pick', 'hit', 'block', 'crit', 'dot', 'stun', 'focus', 'crit2', 'hit2', 'block2']);
     rlLoad(A, SA); rlLoad(B, SB);
     first = aFirst ? A : B; second = aFirst ? B : A;
     for (r = 1; r <= RL_MAX_ROUNDS && A.alive > 0 && B.alive > 0; r++) {
@@ -1390,6 +1436,193 @@
   }
 
   /* ============================================================
+     BATTLE ARCHIVE (1.1.0)
+
+     Keeps what the game sends this page about PvP, as the player browses:
+     squadron battles with their full logs and both groups' member data
+     (Battle Log > Squadron), the arena duel list and every duel opened with
+     View battle, the squadron's groups (Squadron Groups) and the map. It
+     only listens to answers the game itself asked for and received: it sends
+     nothing, clicks nothing and pages through nothing (the game's rules
+     allow scripts for information only). Kept whole, in this browser's
+     IndexedDB, for the squadron simulator and group builder that come next.
+     ============================================================ */
+
+  var ARC_RE = /\/api\/(squadrons\/(battlelog|groups)|battlefield\/(arenaduels|map))(\?|$)/;
+
+  // Runs in the game's own page, before its app starts: wraps the browser's
+  // XMLHttpRequest and fetch so that, when the game's request for one of the
+  // four lists comes back, a copy of the answer is handed to this script.
+  function arcHook() {
+    if (window.__sopvpHook) return;
+    window.__sopvpHook = 1;
+    var RE = /\/api\/(squadrons\/(battlelog|groups)|battlefield\/(arenaduels|map))(\?|$)/;
+    function abs(u) { try { return new URL(String((u && u.href) || u), location.href).href; } catch (e) { return String(u); } }
+    function hand(url, text) { try { window.postMessage({ __sopvp: 1, url: String(url), text: text }, location.origin); } catch (e) {} }
+    var XP = XMLHttpRequest.prototype, oOpen = XP.open, oSend = XP.send;
+    XP.open = function (m, u) { try { this.__sopvpU = abs(u); } catch (e) {} return oOpen.apply(this, arguments); };
+    XP.send = function () {
+      var x = this;
+      try {
+        if (RE.test(x.__sopvpU || '')) x.addEventListener('load', function () {
+          try {
+            if (x.status < 200 || x.status >= 300) return;
+            var t = (x.responseType === '' || x.responseType === 'text') ? x.responseText : (x.responseType === 'json' ? JSON.stringify(x.response) : null);
+            if (t) hand(x.responseURL || x.__sopvpU, t);
+          } catch (e) {}
+        });
+      } catch (e) {}
+      return oSend.apply(this, arguments);
+    };
+    var oFetch = window.fetch;
+    if (typeof oFetch === 'function') window.fetch = function (input) {
+      var p = oFetch.apply(this, arguments);
+      try {
+        var u = abs(typeof input === 'string' ? input : (input && input.url));
+        if (RE.test(u || '')) p.then(function (r) { if (r.ok) r.clone().text().then(function (t) { hand(r.url || u, t); }, function () {}); }, function () {});
+      } catch (e) {}
+      return p;
+    };
+  }
+  try {
+    var hookEl = document.createElement('script');
+    hookEl.textContent = '(' + String(arcHook) + ')();';
+    (document.head || document.documentElement).appendChild(hookEl);
+    hookEl.remove();
+  } catch (e) { setErr('the battle archive could not start: ' + ((e && e.message) || e)); }
+
+  var REALM = /^steam\./i.test(location.hostname) ? 'steam' : 'web';
+  var ARC = { db: null, n: { squad: 0, duel: 0, duelList: 0, roster: 0, map: 0 }, last: 0, bytes: 0, err: null };
+  var ARC_STORES = ['squad', 'duel', 'duelList', 'roster', 'map'];
+
+  function arcOpen() {
+    if (ARC.db) return Promise.resolve(ARC.db);
+    return new Promise(function (ok, no) {
+      var rq;
+      try { rq = indexedDB.open('sopvp-archive', 1); } catch (e) { no(e); return; }
+      rq.onupgradeneeded = function () { var d = rq.result; ARC_STORES.forEach(function (s) { if (!d.objectStoreNames.contains(s)) d.createObjectStore(s); }); };
+      rq.onsuccess = function () { ARC.db = rq.result; ok(ARC.db); };
+      rq.onerror = function () { no(rq.error); };
+    });
+  }
+  function arcTx(store, mode, fn) {
+    return arcOpen().then(function (d) {
+      return new Promise(function (ok, no) {
+        var tx = d.transaction(store, mode), os = tx.objectStore(store), out = fn(os);
+        tx.oncomplete = function () { ok(out && out.result !== undefined ? out.result : out); };
+        tx.onerror = function () { no(tx.error); };
+        tx.onabort = function () { no(tx.error); };
+      });
+    });
+  }
+  // Adds what is not stored yet; returns how many were new.
+  function arcPutNew(store, items) {
+    if (!items.length) return Promise.resolve(0);
+    return arcOpen().then(function (d) {
+      return new Promise(function (ok, no) {
+        var tx = d.transaction(store, 'readwrite'), os = tx.objectStore(store), added = 0;
+        items.forEach(function (it) {
+          var g = os.getKey(it.k);
+          g.onsuccess = function () { if (g.result === undefined) { os.put(it.v, it.k); added++; } };
+        });
+        tx.oncomplete = function () { ok(added); };
+        tx.onerror = function () { no(tx.error); };
+      });
+    });
+  }
+  function arcCount() {
+    return Promise.all(ARC_STORES.map(function (s) { return arcTx(s, 'readonly', function (os) { return os.count(); }); })).then(function (c) {
+      ARC_STORES.forEach(function (s, i) { ARC.n[s] = c[i]; });
+      try { if (navigator.storage && navigator.storage.estimate) return navigator.storage.estimate().then(function (e) { ARC.bytes = e.usage || 0; }); } catch (e) {}
+    });
+  }
+  // A snapshot (roster, map) is kept only when it differs from the last one.
+  var arcLastSnap = {};
+  function arcSnap(store, text, keep) {
+    if (arcLastSnap[store] === text) return Promise.resolve(0);
+    arcLastSnap[store] = text;
+    var k = REALM + '|' + Date.now();
+    return arcPutNew(store, [{ k: k, v: { t: Date.now(), realm: REALM, body: text } }]).then(function (n) {
+      if (!keep) return n;
+      return arcTx(store, 'readwrite', function (os) {
+        var c = os.getAllKeys();
+        c.onsuccess = function () { var ks = c.result.filter(function (x) { return String(x).indexOf(REALM + '|') === 0; }).sort(); ks.slice(0, Math.max(0, ks.length - keep)).forEach(function (x) { os.delete(x); }); };
+      }).then(function () { return n; });
+    });
+  }
+
+  function arcTake(url, text) {
+    var body;
+    try { body = JSON.parse(text); } catch (e) { return; }
+    var job = null;
+    if (/squadrons\/battlelog/.test(url)) {
+      var bs = (body && Array.isArray(body.battles)) ? body.battles : [];
+      job = arcPutNew('squad', bs.filter(function (b) { return b && b._id && Array.isArray(b.logs); }).map(function (b) {
+        return { k: REALM + '|' + b._id, v: { realm: REALM, saved: Date.now(), battle: b } };
+      }));
+    } else if (/battlefield\/arenaduels/.test(url)) {
+      var rs = (body && Array.isArray(body.results)) ? body.results : [];
+      job = arcPutNew('duelList', rs.filter(function (r) { return r && r._id; }).map(function (r) { return { k: REALM + '|' + r._id, v: { realm: REALM, saved: Date.now(), row: r } }; }));
+    } else if (/squadrons\/groups/.test(url)) job = arcSnap('roster', text, 0);
+    else if (/battlefield\/map/.test(url)) job = arcSnap('map', text, 100);
+    if (!job) return;
+    job.then(function () { ARC.last = Date.now(); ARC.err = null; return arcCount(); })
+      .then(function () { if (panel.style.display !== 'none' && view === 'set') render(); }, function (e) { ARC.err = String((e && e.message) || e); });
+  }
+
+  window.addEventListener('message', function (e) {
+    var d = e && e.data;
+    if (!d || d.__sopvp !== 1 || typeof d.url !== 'string' || typeof d.text !== 'string' || !ARC_RE.test(d.url)) return;
+    if (S.inputs.archive === false) return;
+    arcTake(d.url, d.text);
+  });
+
+  // An arena duel's log only reaches the page when it is opened (View
+  // battle): the one in the game's arena store is kept, whole, once.
+  var arcDuelSeen = null;
+  function arcDuelTick() {
+    if (S.inputs.archive === false) return;
+    var st = recState(), A = st && st.PvPArenaStore, d;
+    try { d = A && A.currentDuel; } catch (e) { return; }
+    if (!d || !d._id || !Array.isArray(d.logs) || !d.logs.length || arcDuelSeen === d._id) return;
+    arcDuelSeen = d._id;
+    var copy;
+    try { copy = JSON.parse(JSON.stringify(d)); } catch (e) { return; }
+    arcPutNew('duel', [{ k: REALM + '|' + d._id, v: { realm: REALM, saved: Date.now(), duel: copy } }])
+      .then(function (n) { if (n) { ARC.last = Date.now(); return arcCount(); } }, function (e) { ARC.err = String((e && e.message) || e); });
+  }
+
+  function arcDownload() {
+    return Promise.all(ARC_STORES.map(function (s) { return arcTx(s, 'readonly', function (os) { return os.getAll(); }); })).then(function (all) {
+      var o = { app: 'PvP Meta battle archive', version: scriptVersion(), exported: new Date().toISOString() };
+      ARC_STORES.forEach(function (s, i) { o[s] = all[i]; });
+      var url = URL.createObjectURL(new Blob([JSON.stringify(o)], { type: 'application/json' })), a = document.createElement('a');
+      a.href = url; a.download = 'pvp-archive-' + REALM + '-' + new Date().toISOString().slice(0, 10) + '.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+    });
+  }
+  function arcClear() {
+    return Promise.all(ARC_STORES.map(function (s) { return arcTx(s, 'readwrite', function (os) { os.clear(); }); })).then(function () { arcLastSnap = {}; arcDuelSeen = null; return arcCount(); });
+  }
+
+  function mbTxt(b) { return b >= 1e9 ? (b / 1e9).toFixed(1) + ' GB' : (b / 1e6).toFixed(1) + ' MB'; }
+  function renderArchive() {
+    var h = sect('Battle archive');
+    h += '<div class="tiles">' + tile('Squadron battles', grp(ARC.n.squad), 'full logs') + tile('Arena duels', grp(ARC.n.duel), grp(ARC.n.duelList) + ' in the list') +
+      tile('Roster', ARC.n.roster ? String(ARC.n.roster) : '--', ARC.n.roster ? 'snapshots' : 'open Squadron Groups') + '</div>';
+    h += kvs([['Map snapshots', String(ARC.n.map)], ['Stored in this browser', ARC.bytes ? mbTxt(ARC.bytes) : '--'], ['Last saved', ARC.last ? whenTxt(ARC.last) : 'not this session']]);
+    if (ARC.err) h += line('Archive error: ' + ARC.err, 'bad');
+    h += line('Kept as you browse: Battlefield › Battle Log (squadron battles come with their full logs; set Records per page to 50 and click through the pages once to keep them all), View battle on arena duels, Squadron Groups and the Map. It only reads what the game already shows you: it sends nothing and clicks nothing.');
+    h += line('Kept whole in this browser (about 0.1 MB a squadron battle), for the squadron simulator and group builder that come next. Nothing leaves your computer unless you download it.', 'mu');
+    h += '<div class="row"><label class="c"><input type="checkbox" id="f_arc"' + (S.inputs.archive === false ? '' : ' checked') + '>Keep battles</label></div>';
+    h += '<div class="row"><button class="act" id="b_arcdl">Download archive (.json)</button><button class="act" id="b_arcclr">Clear archive</button></div>';
+    return h;
+  }
+
+  arcCount().catch(function (e) { ARC.err = String((e && e.message) || e); });
+
+  /* ============================================================
      THE PANEL
      ============================================================ */
 
@@ -1457,6 +1690,7 @@
     h += kvs([['Duels stored', String(S.battles.length) + ' / ' + AR_MAX], ['Background worker', S.wkFail ? 'refused: ' + S.wkFail : 'ok']]);
     h += line('Reads your build and your arena duels from the game page. It makes no network request of any kind and never clicks or acts in the game.');
     h += line('Its duels are its own: Astrolabe keeps a separate record, and neither script can see the other\'s.', 'mu');
+    h += renderArchive();
     h += '<div class="row"><button class="act" id="b_back">Back</button></div>';
     return h;
   }
@@ -1500,12 +1734,19 @@
       }, 'change');
     });
     on('#b_back', function () { view = 'pvp'; render(); });
+    on('#f_arc', function () { S.inputs.archive = panel.querySelector('#f_arc').checked; saveInputs(); render(); }, 'change');
+    on('#b_arcdl', function () { arcDownload().catch(function (e) { ARC.err = 'download failed: ' + ((e && e.message) || e); render(); }); });
+    on('#b_arcclr', function () {
+      if (!confirm('Clear the battle archive? Every saved squadron battle, arena duel, roster and map snapshot is deleted from this browser.')) return;
+      arcClear().then(render, function (e) { ARC.err = String((e && e.message) || e); render(); });
+    });
   }
 
   /* ---- timers ---- */
   // Duels: one guarded look a second at the game's loaded-duel slot.
   setInterval(function () {
     try { recTick(); } catch (e) { setErr('recording the duel failed: ' + ((e && e.message) || e)); }
+    try { arcDuelTick(); } catch (e) { ARC.err = String((e && e.message) || e); }
   }, REC_WATCH_MS);
   // The build: every 10 s while the panel is open (Settings is left alone,
   // so a redraw does not throw away what is being typed).

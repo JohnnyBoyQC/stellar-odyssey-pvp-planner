@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PvP Build Planner</title>
-<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.0.0">
+<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.1.0">
 </head>
 <body>
 <script>
@@ -186,7 +186,7 @@
   }
 
   /* ============================================================
-     FROM ASTROLABE 3.22.7 (copied unchanged by the build step)
+     FROM ASTROLABE 3.22.8 (copied unchanged by the build step)
      ============================================================ */
 
   var AR_MAX = 200;
@@ -471,39 +471,38 @@
   }
 
   function rlPhase(a, d, R) {
-    var S = a.S, T = d.S, n = a.alive ? S.N : 0, i, s, shots, cl, t, k, pick, dmg, base, rHit, rBlock, rCrit, rDot, rStun, rFocus;
+    var S = a.S, T = d.S, n = a.alive ? S.N : 0, i, dual, cl, t, k, pick, dmg, base, rHit, rBlock, rCrit, rCrit2, rDot, rStun, rFocus, rHit2, rBlock2;
     for (i = 0; i < n; i++) {
       if (d.alive <= 0) return;
       if (a.hp[i] <= 0) continue;
       if (a.st[i]) { a.st[i] = 0; continue; }
       cl = S.cl[i % S.cl.length];
-      shots = R.dual() < cl.dual ? 2 : 1;
-      for (s = 0; s < shots && d.alive > 0; s++) {
-        pick = Math.floor(R.pick() * d.alive);
-        rHit = R.hit(); rBlock = R.block(); rCrit = R.crit(); rDot = R.dot(); rStun = R.stun(); rFocus = R.focus();
-        if (d.mark >= 0 && d.hp[d.mark] > 0) t = d.mark;
-        else {
-          t = -1;
-          for (k = 0; k < T.N; k++) if (d.hp[k] > 0) { if (pick === 0) { t = k; break; } pick--; }
-        }
-        if (rHit >= S.prec / (S.prec + T.eva)) continue;
-        if (T.sk.block > 0 && rBlock < T.sk.block) continue;
-        base = S.dmg;
-        dmg = base * (rCrit < cl.crit ? cl.cm : 1);
-        if (d.ch[t] > 0) { d.ch[t]--; dmg += base * 0.5; }
-        d.hp[t] -= dmg;
-        if (d.hp[t] <= 0) { d.alive--; if (d.mark === t) d.mark = -1; }
-        else {
-          if (S.sk.dot > 0 && rDot < S.sk.dot) {
-            d.ch[t] = 2; d.hp[t] -= base * 0.5;
-            if (d.hp[t] <= 0) { d.alive--; if (d.mark === t) d.mark = -1; }
-          }
-          if (d.hp[t] > 0) {
-            if (S.sk.stun > 0 && !d.st[t] && rStun < S.sk.stun) d.st[t] = 1;
-            if (S.sk.focus > 0 && d.mark < 0 && rFocus < S.sk.focus) d.mark = t;
-          }
-        }
+      dual = R.dual() < cl.dual;
+      pick = Math.floor(R.pick() * d.alive);
+      rHit = R.hit(); rBlock = R.block(); rCrit = R.crit(); rCrit2 = R.crit2(); rDot = R.dot(); rStun = R.stun(); rFocus = R.focus();
+      rHit2 = R.hit2(); rBlock2 = R.block2();
+      // The second shot of a dual rolls its own hit and block: dual-shot
+      // lines run at the stated chance x the shooter's hit rate x (1 -
+      // block), 512 seen for 507 predicted over 38 players (live, 2026-11-08).
+      if (dual && (rHit2 >= S.prec / (S.prec + T.eva) || (T.sk.block > 0 && rBlock2 < T.sk.block))) dual = false;
+      if (d.mark >= 0 && d.hp[d.mark] > 0) t = d.mark;
+      else {
+        t = -1;
+        for (k = 0; k < T.N; k++) if (d.hp[k] > 0) { if (pick === 0) { t = k; break; } pick--; }
       }
+      if (rHit >= S.prec / (S.prec + T.eva)) continue;
+      base = S.dmg;
+      if (S.sk.focus > 0 && d.mark < 0 && rFocus < S.sk.focus) d.mark = t;
+      if (S.sk.dot > 0 && rDot < S.sk.dot) d.ch[t] = 3;
+      if (d.ch[t] > 0) {
+        d.ch[t]--; d.hp[t] -= Math.floor(base * 0.5);
+        if (d.hp[t] <= 0) { d.alive--; if (d.mark === t) d.mark = -1; continue; }
+      }
+      if (T.sk.block > 0 && rBlock < T.sk.block) continue;
+      dmg = Math.floor(base * ((rCrit < cl.crit ? cl.cm : 1) + (dual ? (rCrit2 < cl.crit ? cl.cm : 1) : 0)));
+      d.hp[t] -= dmg;
+      if (d.hp[t] <= 0) { d.alive--; if (d.mark === t) d.mark = -1; }
+      else if (S.sk.stun > 0 && !d.st[t] && rStun < S.sk.stun) d.st[t] = 1;
     }
   }
 
@@ -516,7 +515,7 @@
 
   function rlDuel(SA, SB, aFirst, seed) {
     var A = RL_A, B = RL_B, first, second, r;
-    var R = rngStreams(seed, ['dual', 'pick', 'hit', 'block', 'crit', 'dot', 'stun', 'focus']);
+    var R = rngStreams(seed, ['dual', 'pick', 'hit', 'block', 'crit', 'dot', 'stun', 'focus', 'crit2', 'hit2', 'block2']);
     rlLoad(A, SA); rlLoad(B, SB);
     first = aFirst ? A : B; second = aFirst ? B : A;
     for (r = 1; r <= RL_MAX_ROUNDS && A.alive > 0 && B.alive > 0; r++) {

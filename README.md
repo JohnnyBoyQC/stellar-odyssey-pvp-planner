@@ -26,12 +26,19 @@ Not ready to paste a key? Click **Try with sample data**.
 
 It records arena duels you fight or open (Battlefield › Battle Log › Arena). After 8 duels, it plans against your real opponents instead of the meta field.
 
+**Battle archive (1.1):** as you browse, it also keeps the squadron battles in your Battle Log (with their full fight logs), arena duels you open, your Squadron Groups and the map, in your own browser. Set the squadron log to 50 per page and click through the pages once to keep them all. This is the groundwork for the squadron simulator and group builder that come next. ⚙ › Battle archive shows what's kept and lets you download or clear it.
+
+## What changed
+
+- **1.1** (script and page): the duel engine follows rules measured on real fight logs. DoT is applied before the block roll. A dual shot is one swing on one target, and its second shot needs its own hit and block. Damage is rounded down. The duel recorder now reads dual shots and crit damage correctly (older versions mistook dual shots for crits). Plus the battle archive above.
+- **1.0**: first release.
+
 ## Within the game's rules
 
 The game allows scripts **for information and display only**. Both tools only read:
 
 - the web page calls the official read-only public API with your own key;
-- the userscript reads what the game page already holds. It makes **no network requests**, never clicks anything, and never acts for you.
+- the userscript reads what the game page already holds, including copies of the answers the game itself receives. It makes **no network requests**, never clicks anything, never pages through logs, and never acts for you.
 
 ## The meta, in short
 
