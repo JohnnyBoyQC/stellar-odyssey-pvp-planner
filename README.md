@@ -1,4 +1,4 @@
-# PvP Build Planner for Stellar Odyssey
+# PvP Build Planner for Stellar Odyssey (beta)
 
 A fan-made arena build planner for Stellar Odyssey. It shows the meta stat split at **your own** total stat, the best free re-spec of your build, and which gear upgrades are worth buying.
 
@@ -28,8 +28,18 @@ It records arena duels you fight or open (Battlefield › Battle Log › Arena).
 
 **Battle archive (1.1):** as you browse, it also keeps the squadron battles in your Battle Log (with their full fight logs), arena duels you open, your Squadron Groups and the map, in your own browser. Set the squadron log to 50 per page and click through the pages once to keep them all. This is the groundwork for the squadron simulator and group builder that come next. ⚙ › Battle archive shows what's kept and lets you download or clear it.
 
+## Plan against a real player or squadron (1.2)
+
+With the userscript installed, open **⚔ PvP Meta** in the game and click **Open in planner ↗**. The planner opens in a new tab with your build, your arena duels and one card per player seen in your squadron battles. No API key is needed for this.
+
+- Under **Plan against**, pick the meta field, all your recorded duels, **one player**, or **one squadron**. The Current, Best build and Upgrades tabs then answer for that choice.
+- Damage, health, clones, crit and dual shot are exact (the game sends them in every squadron battle). Precision, evasion and skills are estimated from how the swings went, with the doubt shown as ±; the plan takes that doubt into account.
+- Open **Squadron Groups** in the game once, so your own members' stats are known: that is what the estimates are measured against.
+- The data travels inside the link after `#`, which browsers never send to any server, and is then kept only in your browser. You can also load the file from ⚙ › Battle archive › Download with **Load archive file**.
+
 ## What changed
 
+- **1.2** (script and page): Open in planner, player and squadron picker, new arena duels keep the opponent's name, dark theme by default, beta label.
 - **1.1** (script and page): the duel engine follows rules measured on real fight logs. DoT is applied before the block roll. A dual shot is one swing on one target, and its second shot needs its own hit and block. Damage is rounded down. The duel recorder now reads dual shots and crit damage correctly (older versions mistook dual shots for crits). Plus the battle archive above.
 - **1.0**: first release.
 

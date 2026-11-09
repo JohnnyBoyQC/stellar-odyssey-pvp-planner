@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Stellar Odyssey – PvP Meta
 // @namespace    stellarodyssey-pvpmeta
-// @version      1.1.0
-// @description  Arena build planner for Stellar Odyssey: the meta split at your own total stat, the best free re-spec, which upgrades pay, and a record of your duels. Built from Astrolabe 3.22.8's simulator. Also keeps the squadron battles, arena duels and roster you browse, for the squadron tools to come. Reads the page only: no network requests, no game actions.
+// @version      1.2.0
+// @description  Arena build planner for Stellar Odyssey: the meta split at your own total stat, the best free re-spec, which upgrades pay, and a record of your duels. Built from Astrolabe 3.22.8's simulator. Keeps the squadron battles, arena duels and roster you browse, and opens them in the web planner in one click (player and squadron picker). Reads the page only: no network requests, no game actions.
 // @match        *://steam.stellarodyssey.app/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -101,6 +101,493 @@
         self.postMessage({ type: 'error', err: String((err && err.message) || err) });
       }
     };
+  }
+
+  // Dark unless light was picked (1.2.0).
+  var THEME = store.get('theme', 'dark');
+
+  /* ============================================================
+     PLAYER EXTRACT (1.2.0): shared by the userscript and the page
+
+     Turns the battle archive (squadron battles with their full logs, arena
+     duels) into one small card per player: damage, health, clones and the
+     clones' crit and dual shot exactly as the game sent them, and
+     precision, evasion and skills estimated from how the swings went.
+
+     Squadron battles are a relay with a kill debuff: after k kills a
+     member's damage, precision and evasion are x(1 - 0.2 x 1.25^(k-1)),
+     at most -90% (measured on 19 live battles). Precision is read from the
+     swings an enemy aimed at our own members, whose evasion is known
+     exactly from the Squadron Groups roster, and evasion from our members'
+     swings at it. Both sides' debuffs are taken into account swing by swing.
+     ============================================================ */
+
+  var PX_VER = 1;
+  var PX_CHANCE = { dot: 0.05, focus: 0.025, stun: 0.05, block: 0.05 };
+  var PX_SK = ['dot', 'focus', 'stun', 'block'];
+
+  // Clones that are all alike are kept once.
+  function pxClCompact(cl) {
+    if (!cl || !cl.length) return [[0, 0, 0]];
+    var a = String(cl[0]);
+    for (var i = 1; i < cl.length; i++) if (String(cl[i]) !== a) return cl;
+    return [cl[0]];
+  }
+  function pxNum(v) { var x = Number(v); return v !== null && v !== '' && isFinite(x) ? x : null; }
+  function pxDebuff(k) { return k > 0 ? 1 - Math.min(0.9, 0.2 * Math.pow(1.25, k - 1)) : 1; }
+  function pxOwner(name) { var m = /^(.*)'s Clone \d+$/.exec(String(name || '')); return m ? m[1] : null; }
+  function pxHpLeft(s) { var m = /(-?\d+)\s*\/\s*(\d+)/.exec(String(s || '')); return m ? +m[1] : null; }
+
+  // The members string of one side of a squadron battle.
+  function pxMembers(s) {
+    var a;
+    try { a = typeof s === 'string' ? JSON.parse(s) : s; } catch (e) { return []; }
+    if (!Array.isArray(a)) return [];
+    return a.filter(function (m) { return m && m.user; }).map(function (m) {
+      var cl = Array.isArray(m.clones) ? m.clones : [];
+      return { user: String(m.user), d: pxNum(m.damage) || 0, h: pxNum(m.maxhp) || pxNum(m.hp) || 0, n: cl.length || 1,
+        cl: pxClCompact(cl.map(function (c) { return [pxNum(c.critical_chance) || 0, pxNum(c.critical_damage) || 0, pxNum(c.dual_shot) || 0]; })) };
+    });
+  }
+
+  // One member of the own roster (/api/squadrons/groups), with its totals
+  // worked out as the game does (getPlayerPvPDamage / HP).
+  function pxRosterMember(m, g, pos) {
+    var ps = m.pvpstats || {}, lv = m.levels || {}, craft = pxNum(lv.crafting_level);
+    if (craft === null && lv.crafting && typeof lv.crafting === 'object') craft = pxNum(lv.crafting.level);
+    craft = craft || 0;
+    var vp = m.velari_pet, vel = vp && vp.equipped ? (pxNum(vp.level) || 0) : 0;
+    var gear = (Array.isArray(m.pvp_gear) ? m.pvp_gear : []).map(function (x) {
+      return { name: String(x.name || 'piece'), stat: String(x.stat || '').toLowerCase(), skill: String(x.skill || '').toLowerCase(), L: pxNum(x.statLevel) || 0, T: pxNum(x.statTier) || 0, mat: String(x.statCost || '').toLowerCase() };
+    });
+    var cl = Array.isArray(m.clones) ? m.clones : [], N = cl.length || 1, tot = {}, pts = {};
+    ['power', 'precision', 'evasion', 'hull'].forEach(function (s) {
+      pts[s] = pxNum(ps[s]) || 0;
+      var t = pts[s] + vel * 50;
+      gear.forEach(function (x) { if (x.stat === s) t += 100 * x.L * (1 + x.T / 100 + craft / 100); });
+      tot[s] = t;
+    });
+    var sk = { dot: 0, focus: 0, stun: 0, block: 0 };
+    gear.forEach(function (x) { if (sk[x.skill] !== undefined) sk[x.skill]++; });
+    return { user: String(m.username || ''), g: g, pos: pos, active: m.active !== false, pts: pts, avail: pxNum(ps.available) || 0, gear: gear, craft: craft, vel: vel,
+      cl: pxClCompact(cl.map(function (c) { return [pxNum(c.critical_chance) || 0, pxNum(c.critical_damage) || 0, pxNum(c.dual_shot) || 0]; })),
+      N: N, tot: tot, d: Math.floor(tot.power * N), h: Math.floor(tot.hull * 7 * N), sk: [sk.dot, sk.focus, sk.stun, sk.block] };
+  }
+
+  // A roster answer: {squad:[{group1:[...], group2, group3, available}]}.
+  function pxRoster(body) {
+    var sq = body && Array.isArray(body.squad) ? body.squad[0] : (body && body.group1 ? body : null), out = [];
+    if (!sq) return out;
+    [1, 2, 3].forEach(function (g) {
+      (Array.isArray(sq['group' + g]) ? sq['group' + g] : []).forEach(function (m, i) { if (m && m.username) out.push(pxRosterMember(m, g, i + 1)); });
+    });
+    (Array.isArray(sq.available) ? sq.available : []).forEach(function (m) { if (m && m.username) out.push(pxRosterMember(m, 0, 0)); });
+    return out;
+  }
+
+  // Reads one squadron battle, swing by swing.
+  //   known(user) -> {p, e} for the members whose precision and evasion are
+  //   known exactly (our own, from the roster), or null.
+  function pxBattle(b, known) {
+    var A = pxMembers(b.attacking_members), D = pxMembers(b.defending_members);
+    var side = {}, mem = {}, alive = {}, kills = {}, order = { A: [], D: [] };
+    A.forEach(function (m) { side[m.user] = 'A'; mem[m.user] = m; alive[m.user] = m.n; kills[m.user] = 0; });
+    D.forEach(function (m) { side[m.user] = 'D'; mem[m.user] = m; alive[m.user] = m.n; kills[m.user] = 0; });
+    var obs = {}, rounds = 0, win = null, lastAtt = null, deaths = [], first = null;
+    function O(u) {
+      return obs[u] || (obs[u] = { p: {}, e: {}, sk: { L: 0, dot: 0, focus: 0, stunT: 0, stun: 0, blkT: 0, blk: 0 }, sw: 0 });
+    }
+    function seen(u) { var s = side[u]; if (s && order[s].indexOf(u) < 0) order[s].push(u); }
+    function add(map, R, succ) {
+      var k = R.toPrecision(5), x = map[k] || (map[k] = [R, 0, 0]);
+      x[1] += succ; x[2]++;
+    }
+    var logs = Array.isArray(b.logs) ? b.logs : [];
+    for (var i = 0; i < logs.length; i++) {
+      var e = logs[i], act = e && e.action;
+      if (!act) continue;
+      if (act === 'round') { rounds = pxNum(e.value) || pxNum(e.round) || rounds; continue; }
+      if (act === 'won') {
+        win = e.attacker && e.attacker !== '-' ? 'A' : (e.defender && e.defender !== '-' ? 'D' : null);
+        var wn = e.attacker && e.attacker !== '-' ? e.attacker : e.defender;
+        var an = b.attacking_squadron && b.attacking_squadron.name, dn = b.defending_squadron && b.defending_squadron.name;
+        if (wn && wn === an) win = 'A'; else if (wn && wn === dn) win = 'D';
+        continue;
+      }
+      var a = pxOwner(e.attacker), t = pxOwner(e.defender);
+      if (a) seen(a);
+      if (t) seen(t);
+      if (act === 'dies') {
+        if (t && alive[t] !== undefined && --alive[t] === 0) {
+          var killer = lastAtt && side[lastAtt] !== side[t] ? lastAtt : null;
+          if (killer) kills[killer]++;
+          deaths.push([rounds, t, killer, killer ? kills[killer] : 0]);
+        }
+        continue;
+      }
+      if (!a || !side[a]) continue;
+      lastAtt = a;
+      // A DoT charge that kills ends the swing that burnt it: no attack line
+      // follows, but the swing landed.
+      var dotKill = act === 'DoT triggers' && (function () { var h = pxHpLeft(e.hpLeft); return h !== null && h <= 0; })();
+      if (act === 'attacks' || act === 'misses hit on' || act === 'attack blocked' || dotKill) {
+        if (first === null) first = a;
+        if (!t || !side[t]) continue;
+        var hit = act !== 'misses hit on' ? 1 : 0, fa = pxDebuff(kills[a]), ft = pxDebuff(kills[t]);
+        var oa = O(a), ot = O(t), ka = known(a), kt = known(t);
+        oa.sw++;
+        // a's precision, from a swing at a target whose evasion is known
+        if (kt && kt.e > 0) add(oa.p, kt.e * ft / fa, hit);
+        // t's evasion, from a swing by an attacker whose precision is known
+        if (ka && ka.p > 0) add(ot.e, ka.p * fa / ft, 1 - hit);
+        if (hit) {
+          oa.sk.L++; ot.sk.blkT++;
+          if (act === 'attack blocked') ot.sk.blk++;
+          else if (act === 'attacks') { var hl = pxHpLeft(e.hpLeft); if (hl === null || hl > 0) oa.sk.stunT++; }
+        }
+      } else if (act === 'applies DoT') O(a).sk.dot++;
+      else if (act === 'stuns') O(a).sk.stun++;
+      else if (act === 'focused') O(a).sk.focus++;
+    }
+    function grp(sq, g, ms) { return { sq: (sq && sq.name) || '?', sid: (sq && sq._id) || null, g: pxNum(g) || 0, m: ms }; }
+    return {
+      id: b._id, t: (pxNum(b.finished) || pxNum(b.created) || 0) * 1000,
+      A: grp(b.attacking_squadron, b.attacking_group, A), D: grp(b.defending_squadron, b.defending_group, D),
+      win: win, r: rounds, first: first, order: order, deaths: deaths, obs: obs
+    };
+  }
+
+  // Most likely X when a swing succeeds with chance X / (X + R), from a list
+  // of [R, successes, tries]; a weak prior of one success and one failure at
+  // the typical R keeps an all-hit or all-miss record finite. se is on the
+  // log scale (0.1 = about +-10%).
+  function pxFit(obs) {
+    var N = 0, S = 0, lr = 0;
+    obs.forEach(function (o) { N += o[2]; S += o[1]; lr += o[2] * Math.log(o[0]); });
+    if (N < 1) return null;
+    var R0 = Math.exp(lr / N), all = obs.concat([[R0, 1, 2]]);
+    var th = Math.log(R0) + Math.log((S + 1) / (N - S + 1)), h = 1;
+    for (var it = 0; it < 50; it++) {
+      var g = 0; h = 0;
+      all.forEach(function (o) { var p = 1 / (1 + Math.exp(Math.log(o[0]) - th)); g += o[1] - o[2] * p; h += o[2] * p * (1 - p); });
+      if (!(h > 0)) break;
+      var step = Math.max(-2, Math.min(2, g / h));
+      th += step;
+      if (Math.abs(step) < 1e-7) break;
+    }
+    return { v: Math.exp(th), se: 1 / Math.sqrt(h), n: N, info: h };
+  }
+
+  function pxLogBin(x, n, p) {
+    if (n <= 0) return 0;
+    p = Math.min(0.999, Math.max(1e-4, p));
+    return x * Math.log(p) + (n - x) * Math.log(1 - p);
+  }
+  // The four gear skills, as whole pieces: the most likely set of four (each
+  // piece is 5%, Focus 2.5%), with how sure that is.
+  function pxSkills(k) {
+    var best = null, tot = 0, list = [];
+    for (var a = 0; a <= 4; a++) for (var b = 0; a + b <= 4; b++) for (var c = 0; a + b + c <= 4; c++) {
+      var d = 4 - a - b - c;
+      var ll = pxLogBin(k.dot, k.L, a * PX_CHANCE.dot) + pxLogBin(k.focus, k.L, b * PX_CHANCE.focus) +
+        pxLogBin(k.stun, k.stunT, c * PX_CHANCE.stun) + pxLogBin(k.blk, k.blkT, d * PX_CHANCE.block);
+      list.push({ s: [a, b, c, d], ll: ll });
+    }
+    var mx = -Infinity;
+    list.forEach(function (x) { if (x.ll > mx) mx = x.ll; });
+    list.forEach(function (x) { x.w = Math.exp(x.ll - mx); tot += x.w; if (!best || x.ll > best.ll) best = x; });
+    return { s: best.s, conf: Math.round(best.w / tot * 100) / 100, n: k.L + k.blkT };
+  }
+
+  function pxSumSk(a, b) { Object.keys(b).forEach(function (k) { a[k] = (a[k] || 0) + b[k]; }); return a; }
+
+  // The whole archive to the extract.
+  //   arc: { squad:[{battle}], duel:[{duel}], roster:[{t, body}] }
+  //   me: our username; duels: duel records (arBuild's shape, with .nm)
+  //   mePE: our own {p, e} now, for when no roster is on file
+  function pxExtract(arc, me, duels, mePE) {
+    var rosters = (arc.roster || []).map(function (r) {
+      var body; try { body = typeof r.body === 'string' ? JSON.parse(r.body) : r.body; } catch (e) { body = null; }
+      return { t: r.t || 0, m: pxRoster(body) };
+    }).filter(function (r) { return r.m.length; }).sort(function (x, y) { return x.t - y.t; });
+    function rosterAt(t) {
+      if (!rosters.length) return null;
+      var pick = rosters[0];
+      rosters.forEach(function (r) { if (r.t <= t) pick = r; });
+      return pick;
+    }
+    var ownNames = {};
+    rosters.forEach(function (r) { r.m.forEach(function (m) { ownNames[m.user] = 1; }); });
+
+    // Which squadron is ours: the one in (nearly) every battle.
+    var sqCount = {}, battles = (arc.squad || []).map(function (x) { return x && (x.battle || x); }).filter(function (b) { return b && Array.isArray(b.logs); });
+    battles.forEach(function (b) {
+      [b.attacking_squadron, b.defending_squadron].forEach(function (s) { if (s && s.name) sqCount[s.name] = (sqCount[s.name] || 0) + 1; });
+    });
+    var own = null;
+    Object.keys(sqCount).forEach(function (k) { if (own === null || sqCount[k] > sqCount[own]) own = k; });
+
+    var players = {}, groups = {}, summaries = [], snapsOf = {};
+    function P(u) { return players[u] || (players[u] = { name: u, sq: null, t: 0, nb: 0, nd: 0, snaps: [] }); }
+    battles.sort(function (x, y) { return (pxNum(x.finished) || 0) - (pxNum(y.finished) || 0); });
+    battles.forEach(function (b) {
+      var t = (pxNum(b.finished) || pxNum(b.created) || 0) * 1000, rs = rosterAt(t), idx = {};
+      if (rs) rs.m.forEach(function (m) { idx[m.user] = m; });
+      var res = pxBattle(b, function (u) {
+        var m = idx[u];
+        if (m) return { p: m.tot.precision, e: m.tot.evasion };
+        if (u === me && mePE) return mePE;
+        return null;
+      });
+      ['A', 'D'].forEach(function (s) {
+        var G = res[s];
+        var gk = G.sq + '|' + G.g, gr = groups[gk] || (groups[gk] = { sq: G.sq, g: G.g, own: G.sq === own ? 1 : 0, n: 0, t: 0, m: [], ord: [] });
+        gr.n++;
+        if (res.t >= gr.t) { gr.t = res.t; gr.m = G.m.map(function (m) { return m.user; }); gr.ord = res.order[s].slice(); }
+        G.m.forEach(function (m) {
+          var p = P(m.user);
+          p.nb++;
+          if (res.t >= p.t) { p.t = res.t; p.sq = G.sq; p.g = G.g; }
+          var key = m.d + '|' + m.h + '|' + m.n, sn = null;
+          p.snaps.forEach(function (x) { if (x.key === key) sn = x; });
+          if (!sn) { sn = { key: key, d: m.d, h: m.h, n: m.n, cl: m.cl, t0: res.t, t1: res.t, nb: 0, p: [], e: [], sk: {} }; p.snaps.push(sn); }
+          sn.nb++; sn.t0 = Math.min(sn.t0, res.t); sn.t1 = Math.max(sn.t1, res.t); sn.cl = m.cl;
+          var o = res.obs[m.user];
+          if (o) {
+            Object.keys(o.p).forEach(function (k) { sn.p.push(o.p[k]); });
+            Object.keys(o.e).forEach(function (k) { sn.e.push(o.e[k]); });
+            pxSumSk(sn.sk, o.sk);
+          }
+        });
+      });
+      function sm(G) { return { sq: G.sq, g: G.g, m: G.m.map(function (m) { return [m.user, m.d, m.h, m.n, m.cl]; }) }; }
+      summaries.push({ id: res.id, t: res.t, A: sm(res.A), D: sm(res.D),
+        win: res.win, r: res.r, first: res.first, order: res.order, deaths: res.deaths });
+    });
+
+    // Arena duels: one fighter each, the opponent's numbers read off the log.
+    (duels || []).forEach(function (r) {
+      if (!r || !r.nm || !r.e || !r.o) return;
+      var p = P(r.nm), f = r.e, q = f.q && f.q.length >= 4 ? f.q : null;
+      p.nd++;
+      if (r.t >= p.t) p.t = r.t;
+      var key = 'duel|' + f.d + '|' + f.h + '|' + f.n, sn = null;
+      p.snaps.forEach(function (x) { if (x.key === key) sn = x; });
+      if (!sn) { sn = { key: key, duel: 1, d: f.d, h: f.h, n: f.n, cl: null, t0: r.t, t1: r.t, nb: 0, p: [], e: [], sk: {}, c: f.c }; p.snaps.push(sn); }
+      sn.nb++; sn.t0 = Math.min(sn.t0, r.t); sn.t1 = Math.max(sn.t1, r.t);
+      if (q && r.o.e > 0 && r.o.p > 0) {
+        sn.p.push([r.o.e, q[0], q[1]]);
+        sn.e.push([r.o.p, Math.max(0, q[3] - q[2]), q[3]]);
+        var s = Array.isArray(f.s) ? f.s : [0, 0, 0, 0];
+        pxSumSk(sn.sk, { L: q[0], dot: Math.round(s[0] * (q[1] + 4) / 100), focus: Math.round(s[1] * (q[1] + 4) / 100), stunT: q[0], stun: Math.round(s[2] * (q[1] + 4) / 100), blkT: q[2], blk: Math.round(s[3] * (q[2] + 4) / 100) });
+      }
+    });
+
+    // One card per player: the latest build seen, and the estimates from
+    // that build's battles when they are enough, else from all of them.
+    var out = [];
+    Object.keys(players).forEach(function (u) {
+      var p = players[u];
+      if (!p.snaps.length) return;
+      p.snaps.sort(function (x, y) { return x.t1 - y.t1; });
+      var sq = p.snaps.filter(function (x) { return !x.duel; }), last = (sq.length ? sq : p.snaps)[(sq.length ? sq : p.snaps).length - 1];
+      function fitOf(which, list) { var all = []; list.forEach(function (x) { all = all.concat(x[which]); }); return pxFit(all); }
+      var pL = fitOf('p', [last]), eL = fitOf('e', [last]), mixed = 0;
+      var pA = fitOf('p', p.snaps), eA = fitOf('e', p.snaps);
+      var pp = pL && pL.info >= 6 ? pL : pA, ee = eL && eL.info >= 6 ? eL : eA;
+      if (pp !== pL || ee !== eL) mixed = p.snaps.length > 1 ? 1 : 0;
+      var skk = {}; p.snaps.forEach(function (x) { pxSumSk(skk, x.sk); });
+      var sk = skk.L || skk.blkT ? pxSkills({ L: skk.L || 0, dot: skk.dot || 0, focus: skk.focus || 0, stunT: skk.stunT || 0, stun: skk.stun || 0, blkT: skk.blkT || 0, blk: skk.blk || 0 }) : null;
+      var cl = last.cl;
+      if (!cl && last.c) cl = last.c.map(function (c) { return [c[0], c[1], c[2]]; });
+      function r3(f) { return f ? [Math.round(f.v), Math.round(f.se * 1000) / 1000, f.n] : null; }
+      out.push({ name: u, sq: p.sq, g: p.g || 0, own: ownNames[u] || p.sq === own ? 1 : 0, t: p.t, nb: p.nb, nd: p.nd, snaps: p.snaps.length, mixed: mixed,
+        d: last.d, h: last.h, n: last.n, cl: cl || [[0, 0, 0]], P: r3(pp), E: r3(ee), sk: sk ? sk.s : null, skc: sk ? sk.conf : 0, skn: sk ? sk.n : 0 });
+    });
+    out.sort(function (x, y) { return y.t - x.t; });
+    var rs = rosters.length ? rosters[rosters.length - 1] : null;
+    return {
+      v: PX_VER, made: Date.now(), me: me || null, own: own, players: out,
+      groups: Object.keys(groups).map(function (k) { return groups[k]; }).sort(function (x, y) { return y.t - x.t; }),
+      roster: rs ? { t: rs.t, m: rs.m } : null, battles: summaries
+    };
+  }
+
+  // A player card as a duel record the planner can fight (arSide / arDraws
+  // shape). The hit counts are the Fisher-equivalent number of swings against
+  // our own precision and evasion, so arDraws spreads the opponent by exactly
+  // the doubt in the estimate. Unknown precision or evasion falls back on the
+  // meta split (15% of the total next to 35% power) with very wide doubt.
+  function pxRecord(card, myP, myE, k) {
+    var N = card.n || 1, pow = card.d / N, hull = card.h / (7 * N);
+    var guess = Math.max(20, (pow + hull) / 2 * 15 / 35);
+    function q(f, ref, kind) {
+      var v = f ? f[0] : guess, se = f ? Math.max(0.02, f[1]) : 0.6;
+      var p = kind === 'p' ? v / (v + ref) : ref / (ref + v), n = Math.max(4, Math.round(1 / (se * se * p * (1 - p))));
+      return [Math.round(p * n), n, v];
+    }
+    var qp = q(card.P, myE, 'p'), qe = q(card.E, myP, 'e');
+    var sk = card.sk || [0, 0, 0, 4];
+    return { v: 3, t: card.t || 0, i: 'vs|' + card.name + '|' + (k || 0), w: 0, f: 0, r: 0, nm: card.name,
+      o: { p: myP, e: myE },
+      e: { n: N, d: card.d, h: card.h, p: Math.round(qp[2]), e: Math.round(qe[2]),
+        s: [sk[0] * 5, sk[1] * 2.5, sk[2] * 5, sk[3] * 5],
+        c: (card.cl && card.cl.length ? card.cl : [[0, 0, 0]]).map(function (c) { return [c[0], c[1], c[2]]; }),
+        // [their hits, their swings, our hits on them, our swings]
+        q: [qp[0], qp[1], qe[0], qe[1]] } };
+  }
+
+  /* ============================================================
+     OPEN IN PLANNER (1.2.0)
+
+     One click sends your build, your recorded duels and a small card per
+     player read from the battle archive to the planner web page, in the
+     part of the link after '#'. Browsers never send that part to any
+     server: it goes from this tab to the new one and nowhere else. Raw
+     battle logs stay here; only the cards travel.
+     ============================================================ */
+
+  var PLANNER_URL = 'https://johnnyboyqc.github.io/stellar-odyssey-pvp-planner/';
+  var PLANNER_ORIGIN = 'https://johnnyboyqc.github.io';
+  var PL_MAX_URL = 1900000;   // Chrome takes links up to 2 MB; above that the data goes by message
+  var PL = { busy: false, err: null, link: null, last: null };
+
+  // From 1.2.0 a duel record also keeps the opponent's name, so the planner
+  // can offer "plan against this player". Older records stay nameless.
+  function recTick() {
+    if (S.inputs.recBattles === false) return;
+    var st = recState(), A = st && st.PvPArenaStore, d;
+    try { d = A && A.currentDuel; } catch (e) { return; }
+    if (!d || !d.logs || !d.logs.length) return;
+    var fp = (d._id || '') + '|' + d.logs.length;
+    if (fp === recSeen) return;
+    var me = st.UserStore && st.UserStore.username;
+    var rec = arBuild(d, me, readPvp(st), Date.now());
+    if (!rec) {
+      if (recTries.fp !== fp) recTries = { fp: fp, n: 0 };
+      if (++recTries.n >= REC_TRIES) recSeen = fp;
+      return;
+    }
+    rec.nm = String(d.attackerName === me ? d.defenderName : d.attackerName);
+    recSeen = fp;
+    var key = arKey(rec);
+    if (S.battles.some(function (r) { return arKey(r) === key; })) return;
+    S.battles.push(rec);
+    S.battles.sort(function (x, y) { return x.t - y.t; });
+    if (S.battles.length > AR_MAX) S.battles = S.battles.slice(-AR_MAX);
+    store.set('battles', S.battles);
+    if (panel.style.display !== 'none' && tab === 'battle') render();
+  }
+
+  // The build as the planner reads it: only the PvP part of the account.
+  function plRoot(st) {
+    var pv = st ? readPvp(st) : null;
+    if (!pv) return null;
+    var P = st.UserStore.player, vel = Math.round(pv.vel / 50);
+    return {
+      UserStore: { username: st.UserStore.username, pvp_badges: pv.badges, player: {
+        pvp_gear: P.pvp_gear.map(function (g) { return { name: g.name, stat: g.stat, skill: g.skill, statLevel: g.statLevel, statTier: g.statTier, statCost: g.statCost }; }),
+        pvpstats: { power: P.pvpstats.power, precision: P.pvpstats.precision, evasion: P.pvpstats.evasion, hull: P.pvpstats.hull, available: P.pvpstats.available },
+        clones: (P.clones || []).map(function (c) { return { critical_chance: c.critical_chance, critical_damage: c.critical_damage, dual_shot: c.dual_shot }; }) } },
+      CraftStore: { crafting_level: pv.craft },
+      MaterialsStore: { materialsList: pv.gear.map(function (g) { return { item: { name: g.mat }, quantity: pv.mats[g.mat] || 0 }; }) },
+      PetsStore: vel ? { petSlots: [{ pet: 'v' }], pets: [{ _id: 'v', name: 'Velari', level: vel }] } : { petSlots: [], pets: [] }
+    };
+  }
+
+  function plPayload() {
+    var st = recState() || S.storeState, me = st && st.UserStore && st.UserStore.username, pv = st ? readPvp(st) : null;
+    var get = function (s) { return arcTx(s, 'readonly', function (os) { return os.getAll(); }).catch(function () { return []; }); };
+    return Promise.all([get('squad'), get('duel'), get('roster')]).then(function (all) {
+      var mine = function (x) { return x && x.realm === REALM; };
+      var squad = all[0].filter(mine), duels = all[1].filter(mine), roster = all[2].filter(mine);
+      // Duels: the recorded ones, plus every duel opened and kept whole in
+      // the archive (those carry the opponent's name, so older ones get it too).
+      var seen = {};
+      S.battles.forEach(function (r) { seen[arKey(r)] = r; });
+      duels.forEach(function (x) {
+        var d = x.duel, r = d && me ? arBuild(d, me, pv, x.saved || Date.now()) : null;
+        if (!r) return;
+        r.nm = String(d.attackerName === me ? d.defenderName : d.attackerName);
+        var k = arKey(r);
+        if (seen[k]) { if (!seen[k].nm) seen[k] = Object.assign({}, seen[k], { nm: r.nm }); return; }
+        seen[k] = r;
+      });
+      var recs = Object.keys(seen).map(function (k) { return seen[k]; }).sort(function (x, y) { return x.t - y.t; });
+      var t = pv ? pvTotals(pv) : null;
+      var x = pxExtract({ squad: squad, roster: roster }, me, recs, t ? { p: t.precision, e: t.evasion } : null);
+      return { app: 'PvP Meta', v: 1, ver: scriptVersion(), realm: REALM, made: Date.now(), root: st ? plRoot(st) : null, duels: recs, x: x };
+    });
+  }
+
+  function plB64(bytes) {
+    var s = '', CH = 0x8000;
+    for (var i = 0; i < bytes.length; i += CH) s += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  // 'z' + deflate, base64url; 'j' + plain JSON where the browser cannot compress.
+  function plEncode(obj) {
+    var bytes = new TextEncoder().encode(JSON.stringify(obj));
+    if (typeof CompressionStream !== 'function') return Promise.resolve('j' + plB64(bytes));
+    var cs = new CompressionStream('deflate-raw'), w = cs.writable.getWriter();
+    w.write(bytes).catch(function () {}); w.close().catch(function () {});
+    return new Response(cs.readable).arrayBuffer().then(function (buf) { return 'z' + plB64(new Uint8Array(buf)); });
+  }
+
+  // A data set too big for a link is handed over by message once the page
+  // says it is ready, and only to the planner's own address.
+  var plPending = null;
+  window.addEventListener('message', function (e) {
+    var d = e && e.data;
+    if (!plPending || e.origin !== PLANNER_ORIGIN || !d || d.sopvpReady !== plPending.nonce || !e.source) return;
+    try { e.source.postMessage({ sopvpData: plPending.obj, nonce: plPending.nonce }, PLANNER_ORIGIN); } catch (er) { PL.err = 'handing the data over failed: ' + er.message; }
+    plPending = null;
+  });
+
+  // The new tab is opened at the click itself (a tab opened later would be
+  // blocked as a pop-up), then sent on once the data is ready.
+  function plOpen() {
+    if (PL.busy) return;
+    PL.busy = true; PL.err = null; PL.link = null;
+    var w = null;
+    try {
+      w = window.open('', '_blank');
+      if (w) { w.document.title = 'PvP Build Planner'; w.document.body.style.cssText = 'font:14px sans-serif;padding:20px;background:#1a2129;color:#ccd'; w.document.body.textContent = 'Getting your duels and battles ready...'; }
+    } catch (e) {}
+    render();
+    plPayload().then(function (obj) {
+      return plEncode(obj).then(function (code) {
+        var url;
+        if (code.length <= PL_MAX_URL) url = PLANNER_URL + '#data=' + code;
+        else { var nonce = String(Math.random()).slice(2); plPending = { nonce: nonce, obj: obj }; url = PLANNER_URL + '#wait=' + nonce; }
+        PL.last = { n: obj.x.players.length, b: obj.x.battles.length, d: obj.duels.length, kb: Math.round(code.length / 1024) };
+        if (w && !w.closed) { try { w.location.replace(url); } catch (e) { PL.link = url; } }
+        else PL.link = url;
+      });
+    }).catch(function (e) {
+      PL.err = 'Preparing the data failed: ' + ((e && e.message) || e);
+      try { if (w && !w.closed) w.document.body.textContent = PL.err; } catch (er) {}
+    }).then(function () { PL.busy = false; render(); });
+  }
+
+  function plRow() {
+    var h = '<div class="row"><button class="act" id="b_plopen"' + (PL.busy ? ' disabled' : '') + '>' + (PL.busy ? 'Preparing...' : 'Open in planner ↗') + '</button></div>';
+    if (PL.link) h += '<div class="line">Your browser blocked the new tab. <a href="' + esc(PL.link) + '" target="_blank" rel="noopener">Open the planner</a></div>';
+    if (PL.err) h += line(PL.err, 'bad');
+    if (PL.last && !PL.busy) h += line('Sent ' + PL.last.d + ' duels and ' + PL.last.n + ' players from ' + PL.last.b + ' squadron battles (' + PL.last.kb + ' KB), inside the link only: no server sees them.', 'mu');
+    return h;
+  }
+
+  // The main view, with the planner button under each tab.
+  function renderBattle() {
+    var pv = S.storeOk ? readPvp(S.storeState) : null;
+    if (!pv) return '<div class="empty">The battlefield data is not readable yet.</div>' + plRow();
+    var h = subTabs();
+    if (bsub === 'fights') return h + renderFights().replace('not saved', 'kept from 1.2.0 on') + plRow();
+    var plan = pvRequest(pv);
+    if (bsub === 'best') return h + renderBest(pv, plan) + plRow();
+    if (bsub === 'up') return h + renderUp(pv, plan) + plRow();
+    return h + renderCur(pv, plan) + plRow();
   }
 
   /* ============================================================
@@ -913,8 +1400,6 @@
     return w;
   }
 
-  var THEME = store.get('theme', 'light');
-
   var CSS = [
     ':host{all:initial}',
     '*{box-sizing:border-box}',
@@ -1128,32 +1613,6 @@
     return recRoot;
   }
 
-  function recTick() {
-    if (S.inputs.recBattles === false) return;
-    var st = recState(), A = st && st.PvPArenaStore, d;
-    try { d = A && A.currentDuel; } catch (e) { return; }
-    if (!d || !d.logs || !d.logs.length) return;
-    var fp = (d._id || '') + '|' + d.logs.length;
-    if (fp === recSeen) return;
-    var me = st.UserStore && st.UserStore.username;
-    var rec = arBuild(d, me, readPvp(st), Date.now());
-    if (!rec) {
-      // Something may just not be readable yet (our build, our name), so it
-      // gets a few more looks before it is left alone.
-      if (recTries.fp !== fp) recTries = { fp: fp, n: 0 };
-      if (++recTries.n >= REC_TRIES) recSeen = fp;
-      return;
-    }
-    recSeen = fp;
-    var key = arKey(rec);
-    if (S.battles.some(function (r) { return arKey(r) === key; })) return;
-    S.battles.push(rec);
-    S.battles.sort(function (x, y) { return x.t - y.t; });
-    if (S.battles.length > AR_MAX) S.battles = S.battles.slice(-AR_MAX);
-    store.set('battles', S.battles);
-    if (panel.style.display !== 'none' && tab === 'battle') render();
-  }
-
   function pvRequest(pv) {
     var recs = S.battles, keep = S.inputs.keepBadges || 0;
     // With no duels on record the plan still runs, against the meta field.
@@ -1198,17 +1657,6 @@
     return '<div class="seg">' + [['cur', 'Current'], ['best', 'Best'], ['up', 'Upgrades'], ['fights', 'Duels']].map(function (x) {
       return '<button data-sub="' + x[0] + '"' + (bsub === x[0] ? ' class="on"' : '') + '>' + x[1] + '</button>';
     }).join('') + '</div>';
-  }
-
-  function renderBattle() {
-    var pv = S.storeOk ? readPvp(S.storeState) : null;
-    if (!pv) return '<div class="empty">The battlefield data is not readable yet.</div>';
-    var h = subTabs();
-    if (bsub === 'fights') return h + renderFights();
-    var plan = pvRequest(pv);
-    if (bsub === 'best') return h + renderBest(pv, plan);
-    if (bsub === 'up') return h + renderUp(pv, plan);
-    return h + renderCur(pv, plan);
   }
 
   function waitLine() {
@@ -1614,10 +2062,11 @@
     h += kvs([['Map snapshots', String(ARC.n.map)], ['Stored in this browser', ARC.bytes ? mbTxt(ARC.bytes) : '--'], ['Last saved', ARC.last ? whenTxt(ARC.last) : 'not this session']]);
     if (ARC.err) h += line('Archive error: ' + ARC.err, 'bad');
     h += line('Kept as you browse: Battlefield › Battle Log (squadron battles come with their full logs; set Records per page to 50 and click through the pages once to keep them all), View battle on arena duels, Squadron Groups and the Map. It only reads what the game already shows you: it sends nothing and clicks nothing.');
-    h += line('Kept whole in this browser (about 0.1 MB a squadron battle), for the squadron simulator and group builder that come next. Nothing leaves your computer unless you download it.', 'mu');
+    h += line('Kept whole in this browser (about 0.1 MB a squadron battle), for the player picker in the planner, squadron simulator and group builder. Nothing leaves your computer unless you download it or open the planner.', 'mu');
     h += '<div class="row"><label class="c"><input type="checkbox" id="f_arc"' + (S.inputs.archive === false ? '' : ' checked') + '>Keep battles</label></div>';
     h += '<div class="row"><button class="act" id="b_arcdl">Download archive (.json)</button><button class="act" id="b_arcclr">Clear archive</button></div>';
-    return h;
+    h += line('Open in planner sends a small card per player (not the raw logs) to the web planner, where you can plan against one player or a whole squadron.', 'mu');
+    return h + plRow();
   }
 
   arcCount().catch(function (e) { ARC.err = String((e && e.message) || e); });
@@ -1735,6 +2184,7 @@
     });
     on('#b_back', function () { view = 'pvp'; render(); });
     on('#f_arc', function () { S.inputs.archive = panel.querySelector('#f_arc').checked; saveInputs(); render(); }, 'change');
+    on('#b_plopen', plOpen);
     on('#b_arcdl', function () { arcDownload().catch(function (e) { ARC.err = 'download failed: ' + ((e && e.message) || e); render(); }); });
     on('#b_arcclr', function () {
       if (!confirm('Clear the battle archive? Every saved squadron battle, arena duel, roster and map snapshot is deleted from this browser.')) return;

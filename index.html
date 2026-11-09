@@ -3,13 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PvP Build Planner</title>
-<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.1.0">
+<title>PvP Build Planner (beta)</title>
+<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.2.0">
 </head>
 <body>
 <script>
 (function () {
   'use strict';
+  var PAGE_VER = "1.2.0";
 
   /* ============================================================
      PvP Build Planner (web page)
@@ -147,18 +148,27 @@
   }
 
   function confLine(plan) {
-    if (plan && plan.synthetic) return line('Scored against the simulated meta field at your own total stat. The API has no duel history, so your real opponents are not known; the in-game PvP Meta script also learns from the duels you fight.', 'mu');
-    return '';
+    if (!plan) return '';
+    var k = vsKind();
+    if (plan.synthetic) {
+      if (k === 'player' || k === 'squad') return line('Nothing to plan against yet: pick a ' + (k === 'player' ? 'player' : 'squadron') + ' above. Until then this is against the simulated meta field at your own total stat.', 'warn');
+      return line('Scored against the simulated meta field at your own total stat.' + (IMP ? '' : ' To plan against real opponents, import from the PvP Meta userscript (above).'), 'mu');
+    }
+    if (k === 'player') return vsLine();
+    if (k === 'squad') return line('Against the members of ' + VS.sq + ', one at a time; win rate good to about ±' + seTxt(plan.cur.se) + ' points.', 'mu');
+    var se = plan.cur ? plan.cur.se : 50;
+    return line(plan.pool + ' duels on record, win rate good to about ±' + seTxt(se) + ' points.', se > 12 ? 'warn' : 'mu');
   }
 
   function renderCur(pv, plan) {
     var t0 = pvTotals(pv), h = '';
     h += '<div class="tiles">' + tile('Damage', grp(t0.damage), 'per clone hit') + tile('Health', grp(t0.hp), 'per clone') +
-      tile('Win rate', plan ? pvPct(plan.cur.score) + '%' : '--', plan ? 'vs the meta field' : 'working') + '</div>';
+      tile('Win rate', plan ? pvPct(plan.cur.score) + '%' : '--', plan ? vsWho(plan) : 'working') + '</div>';
     h += sect('Stat points') + buildTables(pv, t0);
     if (plan) h += hitLines(t0, plan.ref);
     else h += line('Working out the numbers...');
-    h += line('The win rate is how often this build wins a simulated duel against the meta field at your own total stat, half attacking and half defending.');
+    h += line('The win rate is how often this build wins a simulated duel against ' + (plan && !plan.synthetic ? 'the opponents chosen above' : 'the meta field at your own total stat') + ', half attacking and half defending.');
+    if (plan) h += confLine(plan);
     return h;
   }
 
@@ -166,7 +176,7 @@
   // do for a page opened from a file) gets it on the page instead, which
   // only means a few seconds' wait.
   function pvRequest(pv) {
-    var keep = S.inputs.keepBadges || 0, key = pvPlanKey(pv, keep, []);
+    var keep = S.inputs.keepBadges || 0, recs = vsRecs(pv), key = pvPlanKey(pv, keep, recs);
     if (pvMemo.key === key) return pvMemo.plan;
     if (pvBusy !== key && pvFailed !== key) {
       pvBusy = key;
@@ -176,13 +186,750 @@
         else pvMemo = { key: key, plan: plan };
         render();
       };
-      var w = wkRun({ kind: 'pvp', pv: pv, recs: [], keep: keep }, function (m) {
+      var w = wkRun({ kind: 'pvp', pv: pv, recs: recs, keep: keep }, function (m) {
         if (m.type === 'plan') done(m.plan, m.err);
         else if (m.type === 'error') done(null, m.err);
       });
-      if (!w) setTimeout(function () { try { pvPlanRun(pv, [], keep, done); } catch (e) { done(null, e); } }, 30);
+      if (!w) setTimeout(function () { try { pvPlanRun(pv, recs, keep, done); } catch (e) { done(null, e); } }, 30);
     }
     return null;
+  }
+
+  /* ============================================================
+     PLAYER EXTRACT (1.2.0): shared by the userscript and the page
+
+     Turns the battle archive (squadron battles with their full logs, arena
+     duels) into one small card per player: damage, health, clones and the
+     clones' crit and dual shot exactly as the game sent them, and
+     precision, evasion and skills estimated from how the swings went.
+
+     Squadron battles are a relay with a kill debuff: after k kills a
+     member's damage, precision and evasion are x(1 - 0.2 x 1.25^(k-1)),
+     at most -90% (measured on 19 live battles). Precision is read from the
+     swings an enemy aimed at our own members, whose evasion is known
+     exactly from the Squadron Groups roster, and evasion from our members'
+     swings at it. Both sides' debuffs are taken into account swing by swing.
+     ============================================================ */
+
+  var PX_VER = 1;
+  var PX_CHANCE = { dot: 0.05, focus: 0.025, stun: 0.05, block: 0.05 };
+  var PX_SK = ['dot', 'focus', 'stun', 'block'];
+
+  // Clones that are all alike are kept once.
+  function pxClCompact(cl) {
+    if (!cl || !cl.length) return [[0, 0, 0]];
+    var a = String(cl[0]);
+    for (var i = 1; i < cl.length; i++) if (String(cl[i]) !== a) return cl;
+    return [cl[0]];
+  }
+  function pxNum(v) { var x = Number(v); return v !== null && v !== '' && isFinite(x) ? x : null; }
+  function pxDebuff(k) { return k > 0 ? 1 - Math.min(0.9, 0.2 * Math.pow(1.25, k - 1)) : 1; }
+  function pxOwner(name) { var m = /^(.*)'s Clone \d+$/.exec(String(name || '')); return m ? m[1] : null; }
+  function pxHpLeft(s) { var m = /(-?\d+)\s*\/\s*(\d+)/.exec(String(s || '')); return m ? +m[1] : null; }
+
+  // The members string of one side of a squadron battle.
+  function pxMembers(s) {
+    var a;
+    try { a = typeof s === 'string' ? JSON.parse(s) : s; } catch (e) { return []; }
+    if (!Array.isArray(a)) return [];
+    return a.filter(function (m) { return m && m.user; }).map(function (m) {
+      var cl = Array.isArray(m.clones) ? m.clones : [];
+      return { user: String(m.user), d: pxNum(m.damage) || 0, h: pxNum(m.maxhp) || pxNum(m.hp) || 0, n: cl.length || 1,
+        cl: pxClCompact(cl.map(function (c) { return [pxNum(c.critical_chance) || 0, pxNum(c.critical_damage) || 0, pxNum(c.dual_shot) || 0]; })) };
+    });
+  }
+
+  // One member of the own roster (/api/squadrons/groups), with its totals
+  // worked out as the game does (getPlayerPvPDamage / HP).
+  function pxRosterMember(m, g, pos) {
+    var ps = m.pvpstats || {}, lv = m.levels || {}, craft = pxNum(lv.crafting_level);
+    if (craft === null && lv.crafting && typeof lv.crafting === 'object') craft = pxNum(lv.crafting.level);
+    craft = craft || 0;
+    var vp = m.velari_pet, vel = vp && vp.equipped ? (pxNum(vp.level) || 0) : 0;
+    var gear = (Array.isArray(m.pvp_gear) ? m.pvp_gear : []).map(function (x) {
+      return { name: String(x.name || 'piece'), stat: String(x.stat || '').toLowerCase(), skill: String(x.skill || '').toLowerCase(), L: pxNum(x.statLevel) || 0, T: pxNum(x.statTier) || 0, mat: String(x.statCost || '').toLowerCase() };
+    });
+    var cl = Array.isArray(m.clones) ? m.clones : [], N = cl.length || 1, tot = {}, pts = {};
+    ['power', 'precision', 'evasion', 'hull'].forEach(function (s) {
+      pts[s] = pxNum(ps[s]) || 0;
+      var t = pts[s] + vel * 50;
+      gear.forEach(function (x) { if (x.stat === s) t += 100 * x.L * (1 + x.T / 100 + craft / 100); });
+      tot[s] = t;
+    });
+    var sk = { dot: 0, focus: 0, stun: 0, block: 0 };
+    gear.forEach(function (x) { if (sk[x.skill] !== undefined) sk[x.skill]++; });
+    return { user: String(m.username || ''), g: g, pos: pos, active: m.active !== false, pts: pts, avail: pxNum(ps.available) || 0, gear: gear, craft: craft, vel: vel,
+      cl: pxClCompact(cl.map(function (c) { return [pxNum(c.critical_chance) || 0, pxNum(c.critical_damage) || 0, pxNum(c.dual_shot) || 0]; })),
+      N: N, tot: tot, d: Math.floor(tot.power * N), h: Math.floor(tot.hull * 7 * N), sk: [sk.dot, sk.focus, sk.stun, sk.block] };
+  }
+
+  // A roster answer: {squad:[{group1:[...], group2, group3, available}]}.
+  function pxRoster(body) {
+    var sq = body && Array.isArray(body.squad) ? body.squad[0] : (body && body.group1 ? body : null), out = [];
+    if (!sq) return out;
+    [1, 2, 3].forEach(function (g) {
+      (Array.isArray(sq['group' + g]) ? sq['group' + g] : []).forEach(function (m, i) { if (m && m.username) out.push(pxRosterMember(m, g, i + 1)); });
+    });
+    (Array.isArray(sq.available) ? sq.available : []).forEach(function (m) { if (m && m.username) out.push(pxRosterMember(m, 0, 0)); });
+    return out;
+  }
+
+  // Reads one squadron battle, swing by swing.
+  //   known(user) -> {p, e} for the members whose precision and evasion are
+  //   known exactly (our own, from the roster), or null.
+  function pxBattle(b, known) {
+    var A = pxMembers(b.attacking_members), D = pxMembers(b.defending_members);
+    var side = {}, mem = {}, alive = {}, kills = {}, order = { A: [], D: [] };
+    A.forEach(function (m) { side[m.user] = 'A'; mem[m.user] = m; alive[m.user] = m.n; kills[m.user] = 0; });
+    D.forEach(function (m) { side[m.user] = 'D'; mem[m.user] = m; alive[m.user] = m.n; kills[m.user] = 0; });
+    var obs = {}, rounds = 0, win = null, lastAtt = null, deaths = [], first = null;
+    function O(u) {
+      return obs[u] || (obs[u] = { p: {}, e: {}, sk: { L: 0, dot: 0, focus: 0, stunT: 0, stun: 0, blkT: 0, blk: 0 }, sw: 0 });
+    }
+    function seen(u) { var s = side[u]; if (s && order[s].indexOf(u) < 0) order[s].push(u); }
+    function add(map, R, succ) {
+      var k = R.toPrecision(5), x = map[k] || (map[k] = [R, 0, 0]);
+      x[1] += succ; x[2]++;
+    }
+    var logs = Array.isArray(b.logs) ? b.logs : [];
+    for (var i = 0; i < logs.length; i++) {
+      var e = logs[i], act = e && e.action;
+      if (!act) continue;
+      if (act === 'round') { rounds = pxNum(e.value) || pxNum(e.round) || rounds; continue; }
+      if (act === 'won') {
+        win = e.attacker && e.attacker !== '-' ? 'A' : (e.defender && e.defender !== '-' ? 'D' : null);
+        var wn = e.attacker && e.attacker !== '-' ? e.attacker : e.defender;
+        var an = b.attacking_squadron && b.attacking_squadron.name, dn = b.defending_squadron && b.defending_squadron.name;
+        if (wn && wn === an) win = 'A'; else if (wn && wn === dn) win = 'D';
+        continue;
+      }
+      var a = pxOwner(e.attacker), t = pxOwner(e.defender);
+      if (a) seen(a);
+      if (t) seen(t);
+      if (act === 'dies') {
+        if (t && alive[t] !== undefined && --alive[t] === 0) {
+          var killer = lastAtt && side[lastAtt] !== side[t] ? lastAtt : null;
+          if (killer) kills[killer]++;
+          deaths.push([rounds, t, killer, killer ? kills[killer] : 0]);
+        }
+        continue;
+      }
+      if (!a || !side[a]) continue;
+      lastAtt = a;
+      // A DoT charge that kills ends the swing that burnt it: no attack line
+      // follows, but the swing landed.
+      var dotKill = act === 'DoT triggers' && (function () { var h = pxHpLeft(e.hpLeft); return h !== null && h <= 0; })();
+      if (act === 'attacks' || act === 'misses hit on' || act === 'attack blocked' || dotKill) {
+        if (first === null) first = a;
+        if (!t || !side[t]) continue;
+        var hit = act !== 'misses hit on' ? 1 : 0, fa = pxDebuff(kills[a]), ft = pxDebuff(kills[t]);
+        var oa = O(a), ot = O(t), ka = known(a), kt = known(t);
+        oa.sw++;
+        // a's precision, from a swing at a target whose evasion is known
+        if (kt && kt.e > 0) add(oa.p, kt.e * ft / fa, hit);
+        // t's evasion, from a swing by an attacker whose precision is known
+        if (ka && ka.p > 0) add(ot.e, ka.p * fa / ft, 1 - hit);
+        if (hit) {
+          oa.sk.L++; ot.sk.blkT++;
+          if (act === 'attack blocked') ot.sk.blk++;
+          else if (act === 'attacks') { var hl = pxHpLeft(e.hpLeft); if (hl === null || hl > 0) oa.sk.stunT++; }
+        }
+      } else if (act === 'applies DoT') O(a).sk.dot++;
+      else if (act === 'stuns') O(a).sk.stun++;
+      else if (act === 'focused') O(a).sk.focus++;
+    }
+    function grp(sq, g, ms) { return { sq: (sq && sq.name) || '?', sid: (sq && sq._id) || null, g: pxNum(g) || 0, m: ms }; }
+    return {
+      id: b._id, t: (pxNum(b.finished) || pxNum(b.created) || 0) * 1000,
+      A: grp(b.attacking_squadron, b.attacking_group, A), D: grp(b.defending_squadron, b.defending_group, D),
+      win: win, r: rounds, first: first, order: order, deaths: deaths, obs: obs
+    };
+  }
+
+  // Most likely X when a swing succeeds with chance X / (X + R), from a list
+  // of [R, successes, tries]; a weak prior of one success and one failure at
+  // the typical R keeps an all-hit or all-miss record finite. se is on the
+  // log scale (0.1 = about +-10%).
+  function pxFit(obs) {
+    var N = 0, S = 0, lr = 0;
+    obs.forEach(function (o) { N += o[2]; S += o[1]; lr += o[2] * Math.log(o[0]); });
+    if (N < 1) return null;
+    var R0 = Math.exp(lr / N), all = obs.concat([[R0, 1, 2]]);
+    var th = Math.log(R0) + Math.log((S + 1) / (N - S + 1)), h = 1;
+    for (var it = 0; it < 50; it++) {
+      var g = 0; h = 0;
+      all.forEach(function (o) { var p = 1 / (1 + Math.exp(Math.log(o[0]) - th)); g += o[1] - o[2] * p; h += o[2] * p * (1 - p); });
+      if (!(h > 0)) break;
+      var step = Math.max(-2, Math.min(2, g / h));
+      th += step;
+      if (Math.abs(step) < 1e-7) break;
+    }
+    return { v: Math.exp(th), se: 1 / Math.sqrt(h), n: N, info: h };
+  }
+
+  function pxLogBin(x, n, p) {
+    if (n <= 0) return 0;
+    p = Math.min(0.999, Math.max(1e-4, p));
+    return x * Math.log(p) + (n - x) * Math.log(1 - p);
+  }
+  // The four gear skills, as whole pieces: the most likely set of four (each
+  // piece is 5%, Focus 2.5%), with how sure that is.
+  function pxSkills(k) {
+    var best = null, tot = 0, list = [];
+    for (var a = 0; a <= 4; a++) for (var b = 0; a + b <= 4; b++) for (var c = 0; a + b + c <= 4; c++) {
+      var d = 4 - a - b - c;
+      var ll = pxLogBin(k.dot, k.L, a * PX_CHANCE.dot) + pxLogBin(k.focus, k.L, b * PX_CHANCE.focus) +
+        pxLogBin(k.stun, k.stunT, c * PX_CHANCE.stun) + pxLogBin(k.blk, k.blkT, d * PX_CHANCE.block);
+      list.push({ s: [a, b, c, d], ll: ll });
+    }
+    var mx = -Infinity;
+    list.forEach(function (x) { if (x.ll > mx) mx = x.ll; });
+    list.forEach(function (x) { x.w = Math.exp(x.ll - mx); tot += x.w; if (!best || x.ll > best.ll) best = x; });
+    return { s: best.s, conf: Math.round(best.w / tot * 100) / 100, n: k.L + k.blkT };
+  }
+
+  function pxSumSk(a, b) { Object.keys(b).forEach(function (k) { a[k] = (a[k] || 0) + b[k]; }); return a; }
+
+  // The whole archive to the extract.
+  //   arc: { squad:[{battle}], duel:[{duel}], roster:[{t, body}] }
+  //   me: our username; duels: duel records (arBuild's shape, with .nm)
+  //   mePE: our own {p, e} now, for when no roster is on file
+  function pxExtract(arc, me, duels, mePE) {
+    var rosters = (arc.roster || []).map(function (r) {
+      var body; try { body = typeof r.body === 'string' ? JSON.parse(r.body) : r.body; } catch (e) { body = null; }
+      return { t: r.t || 0, m: pxRoster(body) };
+    }).filter(function (r) { return r.m.length; }).sort(function (x, y) { return x.t - y.t; });
+    function rosterAt(t) {
+      if (!rosters.length) return null;
+      var pick = rosters[0];
+      rosters.forEach(function (r) { if (r.t <= t) pick = r; });
+      return pick;
+    }
+    var ownNames = {};
+    rosters.forEach(function (r) { r.m.forEach(function (m) { ownNames[m.user] = 1; }); });
+
+    // Which squadron is ours: the one in (nearly) every battle.
+    var sqCount = {}, battles = (arc.squad || []).map(function (x) { return x && (x.battle || x); }).filter(function (b) { return b && Array.isArray(b.logs); });
+    battles.forEach(function (b) {
+      [b.attacking_squadron, b.defending_squadron].forEach(function (s) { if (s && s.name) sqCount[s.name] = (sqCount[s.name] || 0) + 1; });
+    });
+    var own = null;
+    Object.keys(sqCount).forEach(function (k) { if (own === null || sqCount[k] > sqCount[own]) own = k; });
+
+    var players = {}, groups = {}, summaries = [], snapsOf = {};
+    function P(u) { return players[u] || (players[u] = { name: u, sq: null, t: 0, nb: 0, nd: 0, snaps: [] }); }
+    battles.sort(function (x, y) { return (pxNum(x.finished) || 0) - (pxNum(y.finished) || 0); });
+    battles.forEach(function (b) {
+      var t = (pxNum(b.finished) || pxNum(b.created) || 0) * 1000, rs = rosterAt(t), idx = {};
+      if (rs) rs.m.forEach(function (m) { idx[m.user] = m; });
+      var res = pxBattle(b, function (u) {
+        var m = idx[u];
+        if (m) return { p: m.tot.precision, e: m.tot.evasion };
+        if (u === me && mePE) return mePE;
+        return null;
+      });
+      ['A', 'D'].forEach(function (s) {
+        var G = res[s];
+        var gk = G.sq + '|' + G.g, gr = groups[gk] || (groups[gk] = { sq: G.sq, g: G.g, own: G.sq === own ? 1 : 0, n: 0, t: 0, m: [], ord: [] });
+        gr.n++;
+        if (res.t >= gr.t) { gr.t = res.t; gr.m = G.m.map(function (m) { return m.user; }); gr.ord = res.order[s].slice(); }
+        G.m.forEach(function (m) {
+          var p = P(m.user);
+          p.nb++;
+          if (res.t >= p.t) { p.t = res.t; p.sq = G.sq; p.g = G.g; }
+          var key = m.d + '|' + m.h + '|' + m.n, sn = null;
+          p.snaps.forEach(function (x) { if (x.key === key) sn = x; });
+          if (!sn) { sn = { key: key, d: m.d, h: m.h, n: m.n, cl: m.cl, t0: res.t, t1: res.t, nb: 0, p: [], e: [], sk: {} }; p.snaps.push(sn); }
+          sn.nb++; sn.t0 = Math.min(sn.t0, res.t); sn.t1 = Math.max(sn.t1, res.t); sn.cl = m.cl;
+          var o = res.obs[m.user];
+          if (o) {
+            Object.keys(o.p).forEach(function (k) { sn.p.push(o.p[k]); });
+            Object.keys(o.e).forEach(function (k) { sn.e.push(o.e[k]); });
+            pxSumSk(sn.sk, o.sk);
+          }
+        });
+      });
+      function sm(G) { return { sq: G.sq, g: G.g, m: G.m.map(function (m) { return [m.user, m.d, m.h, m.n, m.cl]; }) }; }
+      summaries.push({ id: res.id, t: res.t, A: sm(res.A), D: sm(res.D),
+        win: res.win, r: res.r, first: res.first, order: res.order, deaths: res.deaths });
+    });
+
+    // Arena duels: one fighter each, the opponent's numbers read off the log.
+    (duels || []).forEach(function (r) {
+      if (!r || !r.nm || !r.e || !r.o) return;
+      var p = P(r.nm), f = r.e, q = f.q && f.q.length >= 4 ? f.q : null;
+      p.nd++;
+      if (r.t >= p.t) p.t = r.t;
+      var key = 'duel|' + f.d + '|' + f.h + '|' + f.n, sn = null;
+      p.snaps.forEach(function (x) { if (x.key === key) sn = x; });
+      if (!sn) { sn = { key: key, duel: 1, d: f.d, h: f.h, n: f.n, cl: null, t0: r.t, t1: r.t, nb: 0, p: [], e: [], sk: {}, c: f.c }; p.snaps.push(sn); }
+      sn.nb++; sn.t0 = Math.min(sn.t0, r.t); sn.t1 = Math.max(sn.t1, r.t);
+      if (q && r.o.e > 0 && r.o.p > 0) {
+        sn.p.push([r.o.e, q[0], q[1]]);
+        sn.e.push([r.o.p, Math.max(0, q[3] - q[2]), q[3]]);
+        var s = Array.isArray(f.s) ? f.s : [0, 0, 0, 0];
+        pxSumSk(sn.sk, { L: q[0], dot: Math.round(s[0] * (q[1] + 4) / 100), focus: Math.round(s[1] * (q[1] + 4) / 100), stunT: q[0], stun: Math.round(s[2] * (q[1] + 4) / 100), blkT: q[2], blk: Math.round(s[3] * (q[2] + 4) / 100) });
+      }
+    });
+
+    // One card per player: the latest build seen, and the estimates from
+    // that build's battles when they are enough, else from all of them.
+    var out = [];
+    Object.keys(players).forEach(function (u) {
+      var p = players[u];
+      if (!p.snaps.length) return;
+      p.snaps.sort(function (x, y) { return x.t1 - y.t1; });
+      var sq = p.snaps.filter(function (x) { return !x.duel; }), last = (sq.length ? sq : p.snaps)[(sq.length ? sq : p.snaps).length - 1];
+      function fitOf(which, list) { var all = []; list.forEach(function (x) { all = all.concat(x[which]); }); return pxFit(all); }
+      var pL = fitOf('p', [last]), eL = fitOf('e', [last]), mixed = 0;
+      var pA = fitOf('p', p.snaps), eA = fitOf('e', p.snaps);
+      var pp = pL && pL.info >= 6 ? pL : pA, ee = eL && eL.info >= 6 ? eL : eA;
+      if (pp !== pL || ee !== eL) mixed = p.snaps.length > 1 ? 1 : 0;
+      var skk = {}; p.snaps.forEach(function (x) { pxSumSk(skk, x.sk); });
+      var sk = skk.L || skk.blkT ? pxSkills({ L: skk.L || 0, dot: skk.dot || 0, focus: skk.focus || 0, stunT: skk.stunT || 0, stun: skk.stun || 0, blkT: skk.blkT || 0, blk: skk.blk || 0 }) : null;
+      var cl = last.cl;
+      if (!cl && last.c) cl = last.c.map(function (c) { return [c[0], c[1], c[2]]; });
+      function r3(f) { return f ? [Math.round(f.v), Math.round(f.se * 1000) / 1000, f.n] : null; }
+      out.push({ name: u, sq: p.sq, g: p.g || 0, own: ownNames[u] || p.sq === own ? 1 : 0, t: p.t, nb: p.nb, nd: p.nd, snaps: p.snaps.length, mixed: mixed,
+        d: last.d, h: last.h, n: last.n, cl: cl || [[0, 0, 0]], P: r3(pp), E: r3(ee), sk: sk ? sk.s : null, skc: sk ? sk.conf : 0, skn: sk ? sk.n : 0 });
+    });
+    out.sort(function (x, y) { return y.t - x.t; });
+    var rs = rosters.length ? rosters[rosters.length - 1] : null;
+    return {
+      v: PX_VER, made: Date.now(), me: me || null, own: own, players: out,
+      groups: Object.keys(groups).map(function (k) { return groups[k]; }).sort(function (x, y) { return y.t - x.t; }),
+      roster: rs ? { t: rs.t, m: rs.m } : null, battles: summaries
+    };
+  }
+
+  // A player card as a duel record the planner can fight (arSide / arDraws
+  // shape). The hit counts are the Fisher-equivalent number of swings against
+  // our own precision and evasion, so arDraws spreads the opponent by exactly
+  // the doubt in the estimate. Unknown precision or evasion falls back on the
+  // meta split (15% of the total next to 35% power) with very wide doubt.
+  function pxRecord(card, myP, myE, k) {
+    var N = card.n || 1, pow = card.d / N, hull = card.h / (7 * N);
+    var guess = Math.max(20, (pow + hull) / 2 * 15 / 35);
+    function q(f, ref, kind) {
+      var v = f ? f[0] : guess, se = f ? Math.max(0.02, f[1]) : 0.6;
+      var p = kind === 'p' ? v / (v + ref) : ref / (ref + v), n = Math.max(4, Math.round(1 / (se * se * p * (1 - p))));
+      return [Math.round(p * n), n, v];
+    }
+    var qp = q(card.P, myE, 'p'), qe = q(card.E, myP, 'e');
+    var sk = card.sk || [0, 0, 0, 4];
+    return { v: 3, t: card.t || 0, i: 'vs|' + card.name + '|' + (k || 0), w: 0, f: 0, r: 0, nm: card.name,
+      o: { p: myP, e: myE },
+      e: { n: N, d: card.d, h: card.h, p: Math.round(qp[2]), e: Math.round(qe[2]),
+        s: [sk[0] * 5, sk[1] * 2.5, sk[2] * 5, sk[3] * 5],
+        c: (card.cl && card.cl.length ? card.cl : [[0, 0, 0]]).map(function (c) { return [c[0], c[1], c[2]]; }),
+        // [their hits, their swings, our hits on them, our swings]
+        q: [qp[0], qp[1], qe[0], qe[1]] } };
+  }
+
+  /* ============================================================
+     SQUADRON BATTLE SIMULATOR (1.2.0)
+
+     A squadron battle is a relay (measured on live logs, 2026-11-08,
+     docs/pvp-research/fable/):
+       - one member per side fights at a time, with all its clones; the
+         defending side's member acts first each round;
+       - when a member's last clone dies, the next member of that group
+         steps in at once, inside the same phase, and the remaining clones
+         of the attacker carry on against it;
+       - the killer gets the kill debuff: after k kills its damage,
+         precision and evasion are x(1 - 0.2 x 1.25^(k-1)), at most -90%,
+         replacing (not compounding) the last one;
+       - a landed swing: Focus may mark, DoT may apply (3 charges), one
+         charge burns (50% of the attacker's undebuffed damage), Block may
+         cancel the rest, damage = floor(base x (shot 1 + shot 2) x debuff),
+         Stun may make the target skip its next swing. A dual shot's second
+         shot rolls its own hit and block.
+       - 300 rounds without a winner: the side with more health left (as a
+         share of its whole group) wins, a tie going to the defender
+         (assumed, not measured).
+
+     A member is {name, N, hp (per clone), dmg (per hit, all clones),
+     prec, eva, sk:{dot,focus,stun,block} (chances), cl:[{crit, cm, dual}]}.
+     ============================================================ */
+
+  var SQ_MAX_ROUNDS = 300;
+
+  function sqDebuff(k) { return k > 0 ? 1 - Math.min(0.9, 0.2 * Math.pow(1.25, k - 1)) : 1; }
+
+  function sqSide(members) {
+    return { m: members, i: 0, hp: [], ch: [], st: [], alive: 0, mark: -1, kills: 0, lostAt: [], left: 0 };
+  }
+  function sqEnter(s) {
+    while (s.i < s.m.length) {
+      var M = s.m[s.i];
+      if (M && M.N > 0) {
+        s.hp = []; s.ch = []; s.st = [];
+        for (var k = 0; k < M.N; k++) { s.hp.push(M.hp); s.ch.push(0); s.st.push(0); }
+        s.alive = M.N; s.mark = -1; s.kills = 0;
+        return true;
+      }
+      s.i++;
+    }
+    s.alive = 0;
+    return false;
+  }
+  function sqHealth(s) {
+    var tot = 0, left = 0, j, k;
+    for (j = 0; j < s.m.length; j++) tot += s.m[j].N * s.m[j].hp;
+    if (s.i < s.m.length && s.alive > 0) {
+      for (k = 0; k < s.hp.length; k++) if (s.hp[k] > 0) left += s.hp[k];
+      for (j = s.i + 1; j < s.m.length; j++) left += s.m[j].N * s.m[j].hp;
+    }
+    return tot ? left / tot : 0;
+  }
+
+  // One side's phase of a round. log: an array to push game-style lines
+  // into, or null. Returns nothing; the sides carry the state.
+  function sqPhase(a, d, R, round, log) {
+    if (a.i >= a.m.length || a.alive <= 0) return;
+    var S = a.m[a.i], n = S.N, i;
+    function nm(M, k) { return M.name + "'s Clone " + (k + 1); }
+    function hpTxt(T, t, hp) { return '[' + Math.max(0, hp) + '/' + T.hp + ']'; }
+    for (i = 0; i < n; i++) {
+      if (d.i >= d.m.length) return;
+      if (a.hp[i] <= 0) continue;
+      if (a.st[i]) { a.st[i] = 0; if (log) log.push({ round: round, attacker: nm(S, i), defender: null, action: 'is stunned', value: 0, hpLeft: '' }); continue; }
+      var T = d.m[d.i], cl = S.cl[i % S.cl.length], fa = sqDebuff(a.kills), ft = sqDebuff(d.kills);
+      var dual = R.dual() < cl.dual, pick = Math.floor(R.pick() * d.alive), t, k;
+      var rHit = R.hit(), rBlock = R.block(), rCrit = R.crit(), rCrit2 = R.crit2(), rDot = R.dot(), rStun = R.stun(), rFocus = R.focus(), rHit2 = R.hit2(), rBlock2 = R.block2();
+      var P = S.prec * fa, E = T.eva * ft, ph = P / (P + E);
+      if (dual && (rHit2 >= ph || (T.sk.block > 0 && rBlock2 < T.sk.block))) dual = false;
+      if (d.mark >= 0 && d.hp[d.mark] > 0) t = d.mark;
+      else {
+        t = -1;
+        for (k = 0; k < T.N; k++) if (d.hp[k] > 0) { if (pick === 0) { t = k; break; } pick--; }
+      }
+      if (t < 0) return;
+      if (rHit >= ph) { if (log) log.push({ round: round, attacker: nm(S, i), defender: nm(T, t), action: 'misses hit on', value: 0, hpLeft: hpTxt(T, t, d.hp[t]) }); continue; }
+      var dead = false;
+      if (S.sk.focus > 0 && d.mark < 0 && rFocus < S.sk.focus) { d.mark = t; if (log) log.push({ round: round, attacker: nm(S, i), defender: nm(T, t), action: 'focused', value: 0, hpLeft: hpTxt(T, t, d.hp[t]) }); }
+      if (S.sk.dot > 0 && rDot < S.sk.dot) { d.ch[t] = 3; if (log) log.push({ round: round, attacker: nm(S, i), defender: nm(T, t), action: 'applies DoT', value: 0, hpLeft: hpTxt(T, t, d.hp[t]) }); }
+      if (d.ch[t] > 0) {
+        d.ch[t]--;
+        var burn = Math.floor(S.dmg * 0.5);
+        d.hp[t] -= burn;
+        if (log) log.push({ round: round, attacker: nm(S, i), defender: nm(T, t), action: 'DoT triggers', value: burn, hpLeft: hpTxt(T, t, d.hp[t]) });
+        if (d.hp[t] <= 0) dead = true;
+      }
+      if (!dead) {
+        if (T.sk.block > 0 && rBlock < T.sk.block) { if (log) log.push({ round: round, attacker: nm(S, i), defender: nm(T, t), action: 'attack blocked', value: 0, hpLeft: hpTxt(T, t, d.hp[t]) }); continue; }
+        var mult = (rCrit < cl.crit ? cl.cm : 1) + (dual ? (rCrit2 < cl.crit ? cl.cm : 1) : 0);
+        var dmg = Math.floor(S.dmg * mult * fa), before = d.hp[t];
+        d.hp[t] -= dmg;
+        if (log) log.push({ round: round, attacker: nm(S, i), defender: nm(T, t), action: 'attacks', value: Math.min(dmg, Math.max(0, before)), hpLeft: hpTxt(T, t, d.hp[t]) });
+        if (d.hp[t] <= 0) dead = true;
+        else if (S.sk.stun > 0 && !d.st[t] && rStun < S.sk.stun) { d.st[t] = 1; if (log) log.push({ round: round, attacker: nm(S, i), defender: nm(T, t), action: 'stuns', value: 0, hpLeft: hpTxt(T, t, d.hp[t]) }); }
+      }
+      if (dead) {
+        d.alive--;
+        if (d.mark === t) d.mark = -1;
+        if (log) log.push({ round: round, attacker: null, defender: nm(T, t), action: 'dies', value: 0, hpLeft: '' });
+        if (d.alive <= 0) {
+          a.kills++;
+          d.lostAt.push(round);
+          d.i++;
+          if (!sqEnter(d)) return;
+        }
+      }
+    }
+  }
+
+  // A (attacking group) against D (defending group), each an ordered list of
+  // members. Returns {win: 1 when A wins, rounds, healthA, healthD, outA,
+  // outD (members lost)}; with wantLog, also the log in the game's format.
+  function sqFight(A, D, seed, wantLog) {
+    var R = rngStreams(seed, ['dual', 'pick', 'hit', 'block', 'crit', 'dot', 'stun', 'focus', 'crit2', 'hit2', 'block2']);
+    var a = sqSide(A), d = sqSide(D), r, log = wantLog ? [] : null;
+    sqEnter(a); sqEnter(d);
+    for (r = 1; r <= SQ_MAX_ROUNDS && a.i < A.length && d.i < D.length; r++) {
+      if (log) log.push({ round: r, attacker: null, defender: null, action: 'round', value: r, hpLeft: '' });
+      sqPhase(d, a, R, r, log);
+      if (a.i >= A.length) break;
+      sqPhase(a, d, R, r, log);
+    }
+    var ha = sqHealth(a), hd = sqHealth(d);
+    var win = d.i >= D.length ? 1 : (a.i >= A.length ? 0 : (ha > hd ? 1 : 0));
+    if (log) log.push({ round: 0, attacker: win ? 'A' : null, defender: win ? null : 'D', action: 'won', value: 0, hpLeft: '' });
+    return { win: win, rounds: Math.min(r, SQ_MAX_ROUNDS), healthA: ha, healthD: hd, outA: Math.min(a.i, A.length), outD: Math.min(d.i, D.length), log: log };
+  }
+
+  // Many fights with different luck: the share A wins, and the average
+  // rounds and members lost.
+  function sqOdds(A, D, sims, seed) {
+    var w = 0, r = 0, oa = 0, od = 0;
+    sims = sims || 200;
+    for (var i = 0; i < sims; i++) {
+      var x = sqFight(A, D, (seed || 11) + i * 7919, false);
+      w += x.win; r += x.rounds; oa += x.outA; od += x.outD;
+    }
+    return { p: w / sims, rounds: r / sims, outA: oa / sims, outD: od / sims, sims: sims };
+  }
+
+  // A player card (pxExtract) or a roster member as a relay member.
+  function sqMember(c) {
+    var N = c.n || c.N || 1, sk = c.sk || [0, 0, 0, 4];
+    var guess = Math.max(20, (c.d / N + c.h / (7 * N)) / 2 * 15 / 35);
+    var prec = c.tot ? c.tot.precision : (c.P ? c.P[0] : guess), eva = c.tot ? c.tot.evasion : (c.E ? c.E[0] : guess);
+    return { name: c.name || c.user, N: N, hp: c.h, dmg: c.d, prec: Math.max(1, prec), eva: Math.max(1, eva),
+      sk: { dot: sk[0] * 0.05, focus: sk[1] * 0.025, stun: sk[2] * 0.05, block: sk[3] * 0.05 },
+      cl: (c.cl && c.cl.length ? c.cl : [[0, 0, 0]]).map(function (x) { return { crit: x[0] / 100, cm: 1 + (30 + x[1]) / 100, dual: x[2] / 100 }; }) };
+  }
+
+  /* ============================================================
+     IMPORT AND OPPONENT PICKER (1.2.0)
+
+     The PvP Meta userscript's "Open in planner" button sends the build,
+     the recorded duels and one card per player (read from the battle
+     archive) in the link after '#', which browsers never send to a server.
+     The downloaded archive file can also be loaded here directly. Either
+     way it is kept in this browser only, and the plan can then be run
+     against the meta field, all recorded duels, one player, or one
+     squadron's members.
+     ============================================================ */
+
+  var IMP = null;            // { x: extract, duels, root, made, ver, realm, src }
+  var VS = Object.assign({ kind: 'auto', pl: null, sq: null, q: '' }, store.get('vs', {}));
+  var GAME_ORIGINS = ['https://steam.stellarodyssey.app', 'https://stellarodyssey.app', 'https://www.stellarodyssey.app'];
+
+  function impLoadSaved() {
+    var x = store.get('imp', null);
+    if (x && x.x && Array.isArray(x.x.players)) IMP = x;
+  }
+  function impSave() {
+    try { localStorage.setItem('sopvpweb:imp', JSON.stringify(IMP)); return true; }
+    catch (e) {
+      // Too big for this browser's page storage: keep it for this visit only.
+      return false;
+    }
+  }
+
+  function impB64(s) {
+    s = s.replace(/-/g, '+').replace(/_/g, '/');
+    while (s.length % 4) s += '=';
+    var bin = atob(s), out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  function impDecode(code) {
+    var kind = code.charAt(0), bytes = impB64(code.slice(1));
+    if (kind === 'j') return Promise.resolve(JSON.parse(new TextDecoder().decode(bytes)));
+    if (kind !== 'z') return Promise.reject(new Error('unknown data format'));
+    if (typeof DecompressionStream !== 'function') return Promise.reject(new Error('this browser cannot unpack the data; try Chrome, Edge or a recent Firefox'));
+    var ds = new DecompressionStream('deflate-raw'), w = ds.writable.getWriter();
+    w.write(bytes).catch(function () {}); w.close().catch(function () {});
+    return new Response(ds.readable).text().then(function (t) { return JSON.parse(t); });
+  }
+
+  // What came from the userscript.
+  function impTake(obj, src) {
+    if (!obj || !obj.x || !Array.isArray(obj.x.players)) throw new Error('this is not PvP Meta data');
+    IMP = { x: obj.x, duels: Array.isArray(obj.duels) ? obj.duels : [], root: obj.root || null, made: obj.made || Date.now(), ver: obj.ver || '?', realm: obj.realm || 'steam', src: src };
+    var kept = impSave();
+    if (VS.kind === 'auto' || VS.kind === 'meta') VS.kind = 'auto';
+    if (IMP.root) use(IMP.root, 'from PvP Meta ' + IMP.ver + ', ' + ago(IMP.made));
+    impStatus(kept ? null : 'Too big to keep in this browser: it is used for this visit only.');
+    renderVs(); render();
+  }
+
+  // The archive file from PvP Meta's Settings › Battle archive › Download.
+  function impFile(file) {
+    impMsg('Reading ' + file.name + '...');
+    var rd = new FileReader();
+    rd.onload = function () {
+      try {
+        var a = JSON.parse(rd.result);
+        if (!a || !Array.isArray(a.squad)) throw new Error('this is not a PvP Meta archive file');
+        var pv = S.storeOk ? readPvp(S.storeState) : null, me = S.storeState && S.storeState.UserStore ? S.storeState.UserStore.username : null;
+        // Without a loaded build, our name is the one in every opened duel.
+        if (!me) {
+          var cnt = {};
+          (a.duel || []).forEach(function (x) { var d = x && x.duel; if (d) [d.attackerName, d.defenderName].forEach(function (n) { if (n) cnt[n] = (cnt[n] || 0) + 1; }); });
+          Object.keys(cnt).forEach(function (n) { if (!me || cnt[n] > cnt[me]) me = n; });
+        }
+        var recs = [];
+        (a.duel || []).forEach(function (x) {
+          var d = x && x.duel, r = d && me && pv ? arBuild(d, me, pv, x.saved || Date.now()) : null;
+          if (r) { r.nm = String(d.attackerName === me ? d.defenderName : d.attackerName); recs.push(r); }
+        });
+        var t = pv ? pvTotals(pv) : null;
+        var x = pxExtract({ squad: a.squad, roster: a.roster || [] }, me, recs, t ? { p: t.precision, e: t.evasion } : null);
+        impTake({ x: x, duels: recs, root: null, made: Date.parse(a.exported) || Date.now(), ver: a.version || '?', realm: 'steam' }, 'file');
+        impMsg('Loaded ' + file.name + ': ' + a.squad.length + ' squadron battles, ' + (a.duel || []).length + ' duels.', 'good');
+      } catch (e) { impMsg('Could not read the file: ' + ((e && e.message) || e), 'bad'); }
+    };
+    rd.onerror = function () { impMsg('Could not read the file.', 'bad'); };
+    rd.readAsText(file);
+  }
+
+  function impMsg(t, cls) { var el = root.querySelector('#impmsg'); if (el) { el.textContent = t || ''; el.className = 'line ' + (cls || ''); } }
+  function impStatus(warn) {
+    var el = root.querySelector('#impstat');
+    if (!el) return;
+    if (!IMP) { el.innerHTML = line('Nothing imported yet. In the game, open ⚔ PvP Meta (1.2 or later) and click Open in planner, or load the archive file it downloads.', 'mu'); return; }
+    var x = IMP.x, sq = {};
+    x.players.forEach(function (p) { if (p.sq) sq[p.sq] = 1; });
+    el.innerHTML = '<div class="tiles">' + tile('Players', String(x.players.length), Object.keys(sq).length + ' squadrons') + tile('Squadron battles', String(x.battles ? x.battles.length : 0), x.own ? 'yours: ' + x.own : '') +
+      tile('Arena duels', String(IMP.duels.length), IMP.duels.filter(function (r) { return r.nm; }).length + ' with names') + '</div>' +
+      line('Imported ' + ago(IMP.made) + (IMP.src === 'file' ? ' from the archive file' : ' from PvP Meta' + (IMP.ver && IMP.ver !== '?' ? ' ' + IMP.ver : '')) + '. Kept in this browser only.' + (x.roster ? '' : ' No Squadron Groups roster in it yet: open Squadron Groups once in the game so your own members\' precision and evasion are known, which sharpens every estimate.'), x.roster ? 'mu' : 'warn') +
+      (warn ? line(warn, 'warn') : '');
+  }
+
+  // Reads '#data=' (or waits for the data by message on '#wait='), then
+  // clears the link so a reload or a shared link carries nothing.
+  function impFromHash() {
+    var h = location.hash || '', m = /^#data=(.+)$/.exec(h), w = /^#wait=(\w+)$/.exec(h);
+    if (!m && !w) return;
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+    if (m) {
+      impMsg('Unpacking the data from PvP Meta...');
+      impDecode(m[1]).then(function (obj) { impTake(obj, 'link'); impMsg('Imported from PvP Meta.', 'good'); },
+        function (e) { impMsg('Could not read the data in the link: ' + ((e && e.message) || e), 'bad'); });
+      return;
+    }
+    var opener = window.opener;
+    if (!opener) { impMsg('The game tab that opened this page is gone: click Open in planner again.', 'bad'); return; }
+    window.addEventListener('message', function on(e) {
+      var d = e.data;
+      if (e.source !== opener || GAME_ORIGINS.indexOf(e.origin) < 0 || !d || d.nonce !== w[1] || !d.sopvpData) return;
+      window.removeEventListener('message', on);
+      try { impTake(d.sopvpData, 'link'); impMsg('Imported from PvP Meta.', 'good'); } catch (er) { impMsg('Could not read the data: ' + er.message, 'bad'); }
+    });
+    impMsg('Waiting for the data from the game tab...');
+    GAME_ORIGINS.forEach(function (o) { try { opener.postMessage({ sopvpReady: w[1] }, o); } catch (e) {} });
+  }
+
+  /* ---- who the plan is against ---- */
+
+  function vsCard(name) {
+    if (!IMP || !name) return null;
+    for (var i = 0; i < IMP.x.players.length; i++) if (IMP.x.players[i].name === name) return IMP.x.players[i];
+    return null;
+  }
+  function vsSquads() {
+    var o = {};
+    if (!IMP) return [];
+    IMP.x.players.forEach(function (p) {
+      if (!p.sq) return;
+      var s = o[p.sq] || (o[p.sq] = { name: p.sq, n: 0, t: 0, own: 0 });
+      s.n++; s.t = Math.max(s.t, p.t); if (p.own) s.own = 1;
+    });
+    return Object.keys(o).map(function (k) { return o[k]; }).sort(function (a, b) { return b.t - a.t; });
+  }
+  function vsKind() {
+    if (VS.kind !== 'auto') return VS.kind;
+    return IMP && IMP.duels.length >= PV_FLOOR ? 'duels' : 'meta';
+  }
+
+  // The records the plan fights. A single player is fought as 8 copies so
+  // the planner's own rules (at least 8 opponents on record) hold; each copy
+  // gets its own luck, and each carries the doubt in the estimate.
+  function vsRecs(pv) {
+    var k = vsKind(), t = pvTotals(pv), out = [];
+    if (k === 'duels') return IMP ? IMP.duels : [];
+    if (k === 'player') {
+      var c = vsCard(VS.pl);
+      if (!c) return [];
+      for (var i = 0; i < PV_FLOOR; i++) out.push(pxRecord(c, t.precision, t.evasion, i));
+      return out;
+    }
+    if (k === 'squad' && IMP) {
+      var ms = IMP.x.players.filter(function (p) { return p.sq === VS.sq; });
+      if (!ms.length) return [];
+      for (var j = 0; out.length < Math.max(PV_FLOOR, ms.length); j++) out.push(pxRecord(ms[j % ms.length], t.precision, t.evasion, Math.floor(j / ms.length)));
+      return out;
+    }
+    return [];
+  }
+
+  function skTxt(sk) {
+    if (!sk) return '?';
+    var n = ['DoT', 'Focus', 'Stun', 'Block'], o = [];
+    sk.forEach(function (x, i) { if (x) o.push(n[i] + (x > 1 ? ' x' + x : '')); });
+    return o.join(', ') || 'none';
+  }
+  function estTxt(f) {
+    if (!f) return { t: '?', c: 'mu' };
+    return { t: grp(f[0]) + ' ±' + Math.round(f[1] * 100) + '%', c: f[1] > 0.25 ? 'warn' : '' };
+  }
+
+  // The planner counts its opponents as duels on record; against one player
+  // (fought as 8 copies) or a squadron that would mislead.
+  function vsFix(h) {
+    var k = vsKind();
+    if (k !== 'player' && k !== 'squad') return h;
+    var n = k === 'player' ? 1 : (IMP ? IMP.x.players.filter(function (p) { return p.sq === VS.sq; }).length : 0);
+    return h.replace(/<div class="tl">Duels<\/div><div class="tv">\d+<\/div><div class="ts">on record<\/div>/,
+      '<div class="tl">Opponent' + (n === 1 ? '' : 's') + '</div><div class="tv">' + esc(k === 'player' ? VS.pl : String(n)) + '</div><div class="ts">' + (k === 'player' ? 'one player' : esc(VS.sq)) + '</div>')
+      .replace(/\d+ already settled/, 'always the same result')
+      .replace('Every opponent on record is one you always beat or always lose to', k === 'player' ? 'You always beat ' + esc(VS.pl) + ', or always lose to them' : 'Every member of ' + esc(VS.sq) + ' is one you always beat or always lose to');
+  }
+  function vsWho(plan) {
+    var k = vsKind();
+    if (plan.synthetic) return 'vs the meta field';
+    if (k === 'player') return 'vs ' + VS.pl;
+    if (k === 'squad') return 'vs ' + VS.sq;
+    return '±' + seTxt(plan.cur.se) + ', ' + plan.pool + ' duels';
+  }
+  function vsLine() {
+    var k = vsKind();
+    if (k === 'player') {
+      var c = vsCard(VS.pl);
+      if (!c) return line('Pick a player below.', 'warn');
+      return line('Against ' + c.name + (c.sq ? ' (' + c.sq + ')' : '') + ', as an arena duel, half attacking and half defending. Damage, health, clones, crit and dual shot are exact' +
+        (c.nb ? ' (from their last squadron battle)' : '') + '; precision ' + estTxt(c.P).t + ', evasion ' + estTxt(c.E).t + ' and skills (' + skTxt(c.sk) + ') are estimated from ' +
+        (c.nb ? c.nb + ' squadron battle' + (c.nb === 1 ? '' : 's') : '') + (c.nb && c.nd ? ' and ' : '') + (c.nd ? c.nd + ' duel' + (c.nd === 1 ? '' : 's') : '') +
+        ', and the plan carries that doubt.' + (c.mixed ? ' Their build changed between battles; older battles were pooled in.' : ''), c.P && c.E ? 'mu' : 'warn');
+    }
+    if (k === 'squad') return VS.sq ? line('Against every member of ' + VS.sq + ' seen in your battles, one at a time as arena duels. For squadron battles as they really run (a relay with kill debuffs), see the group builder.', 'mu') : line('Pick a squadron below.', 'warn');
+    return '';
+  }
+
+  function vsSeg() {
+    var nd = IMP ? IMP.duels.length : 0, k = vsKind();
+    return '<div class="seg">' + [['meta', 'Meta field'], ['duels', 'My duels (' + nd + ')'], ['player', 'A player'], ['squad', 'A squadron']].map(function (x) {
+      return '<button data-vs="' + x[0] + '"' + (k === x[0] ? ' class="on"' : '') + '>' + esc(x[1]) + '</button>';
+    }).join('') + '</div>';
+  }
+
+  function renderVs() {
+    var el = root.querySelector('#vsbody');
+    if (!el) return;
+    impStatus();
+    var k = vsKind(), h = vsSeg();
+    if (!IMP && (k === 'player' || k === 'squad' || k === 'duels')) h += line('Import from PvP Meta first (above).', 'warn');
+    else if (k === 'duels' && IMP.duels.length < PV_FLOOR) h += line('Only ' + IMP.duels.length + ' duels on record, under the ' + PV_FLOOR + ' needed: the plan uses the meta field until then.', 'warn');
+    else if (k === 'player') {
+      var q = (VS.q || '').toLowerCase(), list = IMP.x.players.filter(function (p) { return !q || p.name.toLowerCase().indexOf(q) >= 0 || String(p.sq || '').toLowerCase().indexOf(q) >= 0; });
+      h += '<div class="grid"><label>Find a player or squadron<input type="search" id="f_vsq" value="' + esc(VS.q || '') + '" placeholder="name"></label></div>';
+      h += '<div class="card wide"><table class="t pick"><thead><tr><th>Player</th><th>Squadron</th><th>Seen</th><th>Damage</th><th>Health</th><th>Clones</th><th>Precision</th><th>Evasion</th><th>Skills</th></tr></thead><tbody>' +
+        list.slice(0, 40).map(function (p) {
+          var e1 = estTxt(p.P), e2 = estTxt(p.E);
+          return '<tr data-pick="' + esc(p.name) + '"' + (p.name === VS.pl ? ' class="hl"' : '') + '><td><b>' + esc(p.name) + '</b></td><td>' + esc(p.sq || 'arena') + '</td><td>' + esc(whenTxt(p.t)) + '</td><td>' + esc(grp(p.d)) + '</td><td>' + esc(grp(p.h)) +
+            '</td><td>' + p.n + '</td><td class="' + e1.c + '">' + esc(e1.t) + '</td><td class="' + e2.c + '">' + esc(e2.t) + '</td><td>' + esc(skTxt(p.sk)) + (p.sk && p.skc < 0.6 ? ' ?' : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+      if (list.length > 40) h += line((list.length - 40) + ' more: type part of a name to find them.', 'mu');
+      if (!list.length) h += line('No player matches.', 'mu');
+      h += line('Damage and health are per clone hit and per clone, exactly as the game sent them. ± is the doubt in the estimate (one standard error); "?" after the skills means they are a best guess.', 'mu');
+    } else if (k === 'squad') {
+      h += '<div class="card wide"><table class="t pick"><thead><tr><th>Squadron</th><th>Members seen</th><th>Last seen</th></tr></thead><tbody>' + vsSquads().map(function (q) {
+        return '<tr data-sq="' + esc(q.name) + '"' + (q.name === VS.sq ? ' class="hl"' : '') + '><td><b>' + esc(q.name) + '</b>' + (q.own ? ' (yours)' : '') + '</td><td>' + q.n + '</td><td>' + esc(whenTxt(q.t)) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+    }
+    h += vsLine();
+    el.innerHTML = h;
+    el.querySelectorAll('button[data-vs]').forEach(function (b) { b.addEventListener('click', function () { VS.kind = b.getAttribute('data-vs'); store.set('vs', VS); renderVs(); render(); }); });
+    el.querySelectorAll('tr[data-pick]').forEach(function (r) { r.addEventListener('click', function () { VS.pl = r.getAttribute('data-pick'); store.set('vs', VS); renderVs(); render(); }); });
+    el.querySelectorAll('tr[data-sq]').forEach(function (r) { r.addEventListener('click', function () { VS.sq = r.getAttribute('data-sq'); store.set('vs', VS); renderVs(); render(); }); });
+    var qi = el.querySelector('#f_vsq');
+    if (qi) qi.addEventListener('input', function () {
+      VS.q = qi.value; var pos = qi.selectionStart; renderVs();
+      var n = root.querySelector('#f_vsq'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} }
+    });
   }
 
   /* ============================================================
@@ -386,6 +1133,167 @@
     var out = {};
     names.forEach(function (n, k) { out[n] = btRng((seed | 0) ^ Math.imul(k + 1, 0x9E3779B9)); });
     return out;
+  }
+
+  function rcFit(obs, kind) {
+    var n = 0;
+    obs.forEach(function (o) { n += o.n; });
+    if (n < 12) return null;
+    var best = -Infinity, arg = null;
+    for (var k = 0; k <= 140; k++) {
+      var q = Math.exp(Math.log(20) + k * (Math.log(30000) - Math.log(20)) / 140), ll = 0;
+      for (var i = 0; i < obs.length; i++) {
+        var o = obs[i], p = kind === 'p' ? q / (q + o.o) : o.o / (o.o + q), x = o.x + 0.5, t = o.n + 1;
+        ll += x * Math.log(p) + (t - x) * Math.log(1 - p);
+      }
+      if (ll > best) { best = ll; arg = q; }
+    }
+    return arg;
+  }
+
+  function arOwner(name) { var m = /^(.*)'s Clone \d+$/.exec(String(name || '')); return m ? m[1] : null; }
+
+  function arIndex(name) { var m = /^.*'s Clone (\d+)$/.exec(String(name || '')); return m ? +m[1] : 0; }
+
+  function arHp(s) { var m = /(-?\d+)\s*\/\s*(\d+)/.exec(String(s || '')); return m ? { hp: +m[1], max: +m[2] } : null; }
+
+  function arRound1(x) { return Math.round(x * 10) / 10; }
+
+  function arDamage(vals) {
+    var none = { base: 0, crit: 0, cm: 1.3, dual: 0 };
+    if (!vals.length) return none;
+    var base = Infinity;
+    vals.forEach(function (v) { var k = Math.round(v); if (k > 0 && k < base) base = k; });
+    if (!isFinite(base)) return none;
+    var r = vals.map(function (v) { return v / base; }), TOL = 0.006;
+    function near(x, y) { return Math.abs(x - y) <= y * TOL; }
+    // [factor, crit shots, dual] for one line, or null when c does not explain it
+    function read(x, c) {
+      if (near(x, 1)) return [0, 0];
+      if (near(x, 2)) return [0, 1];
+      if (near(x, c)) return [1, 0];
+      if (near(x, 1 + c)) return [1, 1];
+      if (near(x, 2 * c)) return [2, 1];
+      return null;
+    }
+    var bestC = 1.3, bestN = -1;
+    for (var c = 1.30; c <= 3.5; c += 0.002) {
+      if (Math.abs(c - 2) < 0.02) continue;   // a crit of x2 cannot be told from a dual shot
+      var n = 0;
+      for (var i = 0; i < r.length; i++) if (read(r[i], c)) n++;
+      if (n > bestN) { bestN = n; bestC = c; }
+    }
+    // The grid step leaves c a little off: take the average c the crit
+    // lines themselves imply.
+    var cs = 0, cn = 0;
+    r.forEach(function (x) {
+      var k = read(x, bestC);
+      if (!k || !k[0]) return;
+      cs += k[0] === 2 ? x / 2 : (k[1] ? x - 1 : x); cn++;
+    });
+    if (cn) bestC = cs / cn;
+    var lines = 0, shots = 0, crits = 0, duals = 0;
+    r.forEach(function (x) {
+      var k = read(x, bestC);
+      if (!k) return;
+      lines++; shots += 1 + k[1]; crits += k[0]; duals += k[1];
+    });
+    if (!lines) return { base: base, crit: 0, cm: 1.3, dual: 0 };
+    return { base: base, crit: arRound1(crits / shots * 100), cm: crits ? Math.round(bestC * 1000) / 1000 : 1.3, dual: arRound1(duals / lines * 100), lines: lines, duals: duals };
+  }
+
+  function arBuild(duel, me, pv, nowMs) {
+    try {
+      if (!duel || !duel.logs || !duel.logs.length || !me) return null;
+      if (duel.attackerName !== me && duel.defenderName !== me) return null;
+      var them = duel.attackerName === me ? duel.defenderName : duel.attackerName;
+      if (!them) return null;
+
+      var side = {}, rounds = 0, first = null;
+      function get(n) { return side[n] || (side[n] = { n: 0, max: 0, dmg: [], hit: 0, miss: 0, blocked: 0, att: 0, dot: 0, stun: 0, focus: 0, dual: 0, out: 0, seen: {} }); }
+
+      duel.logs.forEach(function (e) {
+        if (e.action === 'round') { rounds = numOr(e.value) || rounds; return; }
+        var ao = arOwner(e.attacker), dO = arOwner(e.defender);
+        if (dO) { var d = get(dO); d.n = Math.max(d.n, arIndex(e.defender)); var h = arHp(e.hpLeft); if (h) d.max = Math.max(d.max, h.max); }
+        if (ao) { var a = get(ao); a.n = Math.max(a.n, arIndex(e.attacker)); }
+        if (e.action === 'dies') { if (dO) get(dO).out = rounds; return; }
+        if (!ao) return;
+        var A = get(ao);
+        if (e.action === 'attacks' || e.action === 'misses hit on' || e.action === 'attack blocked') {
+          if (first === null) first = ao;
+          A.att++;
+          if (e.action === 'attacks') {
+            A.hit++;
+            // a killing blow is capped at the health left, so it says nothing about the hit
+            var v = numOr(e.value), hl = arHp(e.hpLeft);
+            if (v !== null && v > 0 && !(hl && hl.hp <= 0)) A.dmg.push(v);
+          }
+          else if (e.action === 'attack blocked') { A.hit++; get(dO || ao).blocked++; }
+          else A.miss++;
+          // A dual shot is one log line holding both shots; arDamage reads it.
+        } else if (e.action === 'applies DoT') A.dot++;
+        else if (e.action === 'stuns') A.stun++;
+        else if (e.action === 'focused') A.focus++;
+      });
+
+      var mine = side[me], theirs = side[them];
+      if (!mine || !theirs || !mine.n || !theirs.n || !mine.max || !theirs.max) return null;
+
+      // Our own stats are known exactly, so the opponent's precision comes
+      // from how often it hit us, and its evasion from how often we hit it.
+      var t = pv ? pvTotals(pv) : null;
+      var myP = t ? Math.round(t.precision) : null, myE = t ? Math.round(t.evasion) : null;
+      if (myP === null) return null;
+
+      function fit(hits, swings, known, kind) {
+        if (swings < 12) return null;
+        return rcFit([{ x: hits, n: swings, o: known }], kind);
+      }
+      var opP = fit(theirs.hit, theirs.att, myE, 'p');
+      var opE = fit(mine.hit, mine.att, myP, 'e');
+
+      function skills(s, other) {
+        function pc(x, n) { return Math.min(60, arRound1(x / (n + 4) * 100)); }
+        return [pc(s.dot, s.att), pc(s.focus, s.att), pc(s.stun, s.att), pc(s.blocked, other.hit + 0)];
+      }
+      // The log shows a dual line only when the second shot also lands
+      // unblocked, so the stat is the share seen divided by that chance,
+      // pulled towards a typical 35% while there are few lines to go on (as
+      // if 30 lines at 35% had been seen) and capped at 60%, above anything
+      // seen live.
+      function dualStat(s, other, dmg) {
+        var p2 = Math.max(0.05, (s.hit - other.blocked) / Math.max(1, s.att)), K = 30;
+        if (!dmg.lines) return 0;
+        return arRound1(Math.min(60, (dmg.duals + 0.35 * p2 * K) / (p2 * (dmg.lines + K)) * 100));
+      }
+      function fighter(s, other, dmg, p, e) {
+        return { n: s.n, d: dmg.base, h: s.max, p: p, e: e,
+          s: skills(s, other), c: [[dmg.crit, arRound1((dmg.cm - 1) * 100 - 30), dualStat(s, other, dmg)]],
+          x: s.out || 0,
+          // how the hit counts came out, so a later reader can tell a
+          // precision read off 12 swings from one read off 120
+          q: [s.hit, s.att, other.hit, other.att] };
+      }
+      var myDmg = arDamage(mine.dmg), opDmg = arDamage(theirs.dmg);
+
+      // Did the build that fought this duel still look like today's build?
+      var approx = 0;
+      if (t) {
+        var expD = t.power * mine.n, expH = t.hull * PVP_HP_MULT * mine.n;
+        if (Math.abs(myDmg.base / expD - 1) > 0.02 || Math.abs(mine.max / expH - 1) > 0.02) approx = 1;
+      }
+
+      var out = {
+        v: 3, t: (numOr(duel.created) || 0) * 1000 || nowMs, i: typeof duel._id === 'string' ? duel._id : null,
+        w: duel.winner === me ? 1 : 0, f: first === me ? 1 : 0, r: rounds,
+        o: fighter(mine, theirs, myDmg, myP, myE),
+        e: fighter(theirs, mine, opDmg, opP === null ? myP : Math.round(opP), opE === null ? myE : Math.round(opE))
+      };
+      if (opP === null || opE === null) out.e.u = 1;
+      if (approx) out.a = 1;
+      return out;
+    } catch (e) { return null; }
   }
 
   function arKey(rec) {
@@ -1197,16 +2105,20 @@
     '.btns{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}',
     'button.pri{background:var(--ac);color:#0d1b24;border:0;border-radius:8px;padding:8px 14px;font:inherit;font-weight:600;cursor:pointer}',
     'button.pri[disabled]{opacity:.5;cursor:default}',
-    'button.sec{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:8px;padding:8px 14px;font:inherit;cursor:pointer}',
-    'button.sec:hover{border-color:var(--ac);color:var(--ac)}',
+    '.card.wide{overflow-x:auto}label.sec{font-size:inherit;color:var(--tx)}',
+    'button.sec,label.sec{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:8px;padding:8px 14px;font:inherit;cursor:pointer}',
+    'button.sec:hover,label.sec:hover{border-color:var(--ac);color:var(--ac)}',
     '#status{margin:12px 2px;font-size:12px;color:var(--mu)}#status.bad{color:var(--bad)}#status.good{color:var(--good)}',
     '#out{margin-top:6px}',
     '.foot{color:var(--mu);font-size:11px;margin-top:22px;line-height:1.5}',
+    '.beta{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;vertical-align:middle;padding:2px 7px;border-radius:6px;border:1px solid var(--ac);color:var(--ac);margin-left:4px}',
+    '.pick tbody tr{cursor:pointer}.pick tbody tr:hover td{background:rgba(127,160,200,.12)}',
+    '.filebtn{position:relative;overflow:hidden;display:inline-block}.filebtn input{position:absolute;inset:0;opacity:0;cursor:pointer}',
     '@media (max-width:520px){.form{grid-template-columns:1fr}.tiles{grid-template-columns:1fr 1fr}table.t{font-size:11px}table.t td,table.t th{padding:4px 5px}}'
   ].join('');
 
   var dark = store.get('theme', null);
-  if (dark === null) { try { dark = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; } catch (e) { dark = 'light'; } }
+  if (dark !== 'light') dark = 'dark';   // dark unless light was picked
 
   var cssEl = document.createElement('style'); cssEl.textContent = CSS + PAGE_CSS; document.head.appendChild(cssEl);
   var root = document.createElement('div');
@@ -1217,7 +2129,7 @@
   var savedKey = store.get('key', '') || '';
   root.innerHTML =
     '<div class="page">' +
-    '<div class="hd"><h1>⚔ PvP Build Planner</h1><span class="sub">for Stellar Odyssey · fan-made</span><span class="sp"></span><span class="g" id="theme">◐ theme</span></div>' +
+    '<div class="hd"><h1>⚔ PvP Build Planner <span class="beta">beta</span></h1><span class="sub">for Stellar Odyssey · fan-made · v' + esc(PAGE_VER) + '</span><span class="sp"></span><span class="g" id="theme">◐ theme</span></div>' +
     '<div class="box">' +
     '<div class="form">' +
     '<label>Realm<select id="f_realm"><option value="steam">Steam</option><option value="web">Web</option></select></label>' +
@@ -1227,7 +2139,12 @@
     '<label class="c" style="margin-left:auto"><input type="checkbox" id="f_remember"' + (savedKey ? ' checked' : '') + '>Remember key on this device</label></div>' +
     '<div class="line">Your key is sent only to the game\'s own public API, straight from this browser. Each load uses 1 of your 50 daily calls to /user; a load within 30 minutes reuses the last answer for free.</div>' +
     '</div>' +
-    '<div id="status"></div><div id="out"></div>' +
+    '<div class="box" style="margin-top:16px"><h4 style="margin-top:0">Your duels and squadron battles</h4><div id="impstat"></div>' +
+    '<div class="btns"><label class="sec filebtn">Load archive file (.json)<input type="file" id="f_arcfile" accept=".json,application/json"></label><button class="sec" id="b_impclr">Forget imported data</button></div>' +
+    '<div id="impmsg" class="line"></div></div>' +
+    '<div id="status"></div>' +
+    '<div class="box" style="margin:10px 0 12px"><h4 style="margin-top:0">Plan against</h4><div id="vsbody"></div></div>' +
+    '<div id="out"></div>' +
     '<div class="box" style="margin-top:16px"><h4 style="margin-top:0">Settings</h4><div class="grid">' +
     '<label>Badges to keep<input type="number" min="0" step="1" id="f_kb" value="' + esc(String(S.inputs.keepBadges)) + '"></label>' +
     '<label>Least gain worth a change (win %)<input type="number" min="0" step="any" id="f_gap" value="' + esc(String(S.inputs.bestGap)) + '"></label>' +
@@ -1245,7 +2162,7 @@
   var panel = out, tab = 'battle';
 
   function status(txt, cls) { statusEl.textContent = txt || ''; statusEl.className = cls || ''; }
-  function ago(ms) { var m = Math.round((Date.now() - ms) / 60000); return m < 1 ? 'just now' : m + ' min ago'; }
+  function ago(ms) { var m = Math.round((Date.now() - ms) / 60000); return m < 1 ? 'just now' : (m < 90 ? m + ' min ago' : (m < 2160 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' days ago')); }
   function keyTag(k) { var h = 0; for (var i = 0; i < k.length; i++) h = (h * 31 + k.charCodeAt(i)) | 0; return String(h); }
 
   function render() {
@@ -1256,7 +2173,7 @@
         return;
       }
       var keep = out.scrollTop;
-      var pv = readPvp(S.storeState), h = renderBattle();
+      var pv = readPvp(S.storeState), h = vsFix(renderBattle());
       h += kvs([['Clones', String(pv.N)], ['Gear pieces', String(pv.gear.length)], ['Stat points', grp(pv.pool)], ['PvP badges', grp(pv.badges)], ['Crafting level', String(pv.craft)], ['Velari bonus', '+' + grp(pv.vel)]]);
       h += apiNotes.map(function (n) { return line(n, 'warn'); }).join('');
       if (S.lastErr) h += line(S.lastErr, 'bad');
@@ -1325,6 +2242,16 @@
     }, 'sample data, not your account');
   }
 
+  $('f_arcfile').addEventListener('change', function () { var f = $('f_arcfile').files[0]; if (f) impFile(f); $('f_arcfile').value = ''; });
+  $('b_impclr').addEventListener('click', function () {
+    if (!confirm('Forget the imported duels and battles? They stay in the PvP Meta archive in the game tab.')) return;
+    IMP = null; store.set('imp', null); impMsg(''); renderVs(); render();
+  });
+  impLoadSaved();
+  if (IMP && IMP.root) use(IMP.root, 'from PvP Meta ' + IMP.ver + ', ' + ago(IMP.made));
+  renderVs();
+  impFromHash();
+  window.addEventListener('hashchange', impFromHash);
   $('b_load').addEventListener('click', load);
   keyEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') load(); });
   $('b_sample').addEventListener('click', sample);
