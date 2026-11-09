@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PvP Build Planner (beta)</title>
-<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.4.1">
+<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.4.2">
 </head>
 <body>
 <script>
 (function () {
   'use strict';
-  var PAGE_VER = "1.4.1";
+  var PAGE_VER = "1.4.2";
   var GRAB_SRC = "(function () {\nif (window.__sopvpGrab) { window.__sopvpGrab.show(); return; }\nvar PL = 'https://johnnyboyqc.github.io/stellar-odyssey-pvp-planner/', OR = 'https://johnnyboyqc.github.io';\nvar G = { squad: {}, roster: null, duels: {}, box: null };\nvar RE = /\\/api\\/squadrons\\/(battlelog|groups)(\\?|$)/;\nfunction abs(u) { try { return new URL(String((u && u.href) || u), location.href).href; } catch (e) { return String(u); } }\nfunction take(url, text) {\nvar b;\ntry { b = JSON.parse(text); } catch (e) { return; }\nif (/battlelog/.test(url)) (b && b.battles || []).forEach(function (x) { if (x && x._id && Array.isArray(x.logs)) G.squad[x._id] = x; });\nelse G.roster = { t: Date.now(), body: text };\ndraw();\n}\nvar XP = XMLHttpRequest.prototype, oO = XP.open, oS = XP.send;\nXP.open = function (m, u) { try { this.__sopvpG = abs(u); } catch (e) {} return oO.apply(this, arguments); };\nXP.send = function () {\nvar x = this;\ntry {\nif (RE.test(x.__sopvpG || '')) x.addEventListener('load', function () {\ntry {\nif (x.status < 200 || x.status >= 300) return;\nvar t = (x.responseType === '' || x.responseType === 'text') ? x.responseText : (x.responseType === 'json' ? JSON.stringify(x.response) : null);\nif (t) take(x.responseURL || x.__sopvpG, t);\n} catch (e) {}\n});\n} catch (e) {}\nreturn oS.apply(this, arguments);\n};\nvar oF = window.fetch;\nif (typeof oF === 'function') window.fetch = function (i) {\nvar p = oF.apply(this, arguments);\ntry {\nvar u = abs(typeof i === 'string' ? i : (i && i.url));\nif (RE.test(u)) p.then(function (r) { if (r.ok) r.clone().text().then(function (t) { take(r.url || u, t); }, function () {}); }, function () {});\n} catch (e) {}\nreturn p;\n};\nfunction state() {\ntry {\nvar el = document.querySelector('#q-app') || document.querySelector('#app'), a = el && el.__vue_app__;\nvar p = a && a.config && a.config.globalProperties && a.config.globalProperties.$pinia;\nreturn p && p.state && p.state.value;\n} catch (e) { return null; }\n}\nfunction copy(o) { try { return JSON.parse(JSON.stringify(o)); } catch (e) { return null; } }\nfunction tick() {\nvar st = state();\nif (!st) return;\ntry {\nvar A = st.PvPArenaStore, d = A && A.currentDuel;\nif (d && d._id && d.logs && d.logs.length && !G.duels[d._id]) { G.duels[d._id] = copy(d); draw(); }\nvar s = st.squadronStore;\nif (!G.roster && s && s.group1 && s.group1.length) { G.roster = { t: Date.now(), body: JSON.stringify({ squad: [{ group1: copy(s.group1), group2: copy(s.group2 || []), group3: copy(s.group3 || []), available: [] }] }) }; draw(); }\n} catch (e) {}\n}\nsetInterval(tick, 1000);\nfunction build(st) {\ntry {\nvar U = st.UserStore, P = U.player, mats = {};\n(P.pvp_gear || []).forEach(function (g) { mats[String(g.statCost || '').toLowerCase()] = 1; });\nvar slots = (st.PetsStore && st.PetsStore.petSlots) || [], inSlot = {};\nslots.forEach(function (x) { if (x && x.pet) inSlot[x.pet] = 1; });\nreturn {\nUserStore: { username: U.username, pvp_badges: U.pvp_badges, player: copy({ pvp_gear: P.pvp_gear, pvpstats: P.pvpstats, clones: P.clones }) },\nCraftStore: { crafting_level: st.CraftStore && st.CraftStore.crafting_level },\nMaterialsStore: { materialsList: ((st.MaterialsStore && st.MaterialsStore.materialsList) || []).filter(function (m) { var n = m && m.item && (m.item.name || m.item); return n && mats[String(n).toLowerCase()]; }).map(function (m) { return { item: { name: m.item.name || m.item }, quantity: m.quantity }; }) },\nPetsStore: { petSlots: slots.filter(function (x) { return x && x.pet; }).map(function (x) { return { pet: x.pet }; }), pets: ((st.PetsStore && st.PetsStore.pets) || []).filter(function (p) { return p && inSlot[p._id] && p.name === 'Velari'; }).map(function (p) { return { _id: p._id, name: p.name, level: p.level }; }) }\n};\n} catch (e) { return null; }\n}\nfunction payload() {\nvar st = state();\nreturn { app: 'PvP Planner button', v: 1, made: Date.now(), me: st && st.UserStore ? st.UserStore.username : null, build: st ? build(st) : null,\nsquad: Object.keys(G.squad).map(function (k) { return { battle: G.squad[k] }; }),\nduel: Object.keys(G.duels).map(function (k) { return { duel: G.duels[k], saved: Date.now() }; }),\nroster: G.roster ? [G.roster] : [] };\n}\nfunction send() {\nvar nonce = String(Math.random()).slice(2), w = window.open(PL + '#wait=' + nonce, '_blank');\nif (!w) { alert(L.p); return; }\nwindow.addEventListener('message', function on(e) {\nif (e.origin !== OR || !e.data || e.data.sopvpReady !== nonce || !e.source) return;\nwindow.removeEventListener('message', on);\ne.source.postMessage({ sopvpRaw: payload(), nonce: nonce }, OR);\n});\n}\nvar L = (function () {\nvar n = String((navigator.languages && navigator.languages[0]) || navigator.language || 'en').toLowerCase();\nvar T = {\nes: { b: 'batallas de escuadrón', d: 'duelos de arena', r: 'plantilla', y: 'sí', n: 'todavía no', h: 'Ahora recorre Registro de peleas › Escuadrón (50 por página, todas las páginas), abre Grupos de escuadrón y pulsa Ver pelea en tus duelos de arena. Deja esta pestaña abierta.', s: 'Enviar al planificador ↗', p: 'El navegador bloqueó la pestaña nueva: permite las ventanas emergentes de este sitio y vuelve a pulsar Enviar.' },\nzh: { b: '场舰队战斗', d: '场竞技场决斗', r: '名单', y: '已有', n: '还没有', h: '现在浏览 战斗日志 › 舰队（每页 50 条，每一页都看），打开舰队编组，并在竞技场决斗上点击查看战斗。请保持此标签页打开。', s: '发送到规划器 ↗', p: '浏览器拦截了新标签页：请允许本网站弹出窗口后再点一次发送。' },\nen: { b: 'squadron battles', d: 'arena duels', r: 'roster', y: 'yes', n: 'not yet', h: 'Now browse Battle Log › Squadron (50 per page, every page), open Squadron Groups, and click View battle on your arena duels. Keep this tab open.', s: 'Send to planner ↗', p: 'The browser blocked the new tab: allow pop-ups for this site, then click Send again.' }\n};\nreturn T[n.indexOf('es') === 0 ? 'es' : (n.indexOf('zh') === 0 ? 'zh' : 'en')];\n})();\nfunction draw() {\nif (!G.box) return;\nvar n = Object.keys(G.squad).length, d = Object.keys(G.duels).length;\nG.box.querySelector('.c').textContent = n + ' ' + L.b + ', ' + d + ' ' + L.d + ', ' + L.r + ': ' + (G.roster ? L.y : L.n);\n}\nfunction show() {\nif (G.box) { G.box.style.display = 'block'; return; }\nvar b = document.createElement('div');\nb.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;background:#1a2129;color:#d5dde6;border:1px solid #4fb3e8;border-radius:10px;padding:10px 12px;font:13px sans-serif;max-width:300px;box-shadow:0 4px 16px rgba(0,0,0,.4)';\nb.innerHTML = '<b>PvP Planner<\/b> <span style=\"float:right;cursor:pointer\" class=\"x\">✕<\/span><div class=\"c\" style=\"margin:6px 0\"><\/div>' +\n'<div class=\"h\" style=\"font-size:11px;color:#9aa8b6;margin-bottom:8px\"><\/div>' +\n'<button class=\"s\" style=\"background:#4fb3e8;color:#0d1b24;border:0;border-radius:7px;padding:6px 12px;font-weight:600;cursor:pointer\"><\/button>';\nb.querySelector('.s').textContent = L.s;\nb.querySelector('.h').textContent = L.h;\nb.querySelector('.x').onclick = function () { b.style.display = 'none'; };\nb.querySelector('.s').onclick = send;\ndocument.body.appendChild(b);\nG.box = b; draw();\n}\nwindow.__sopvpGrab = { show: show, data: G };\ntick(); show();\n})();";
 
   /* ============================================================
@@ -1107,14 +1107,14 @@
      first, then steps of 1/20, 1/40 and 1/80. About 2 seconds. */
   var PV_CLIMB_SIMS = 400;
 
-  function pvClimb(b, pool, sims, steps) {
+  function pvClimb(b, pool, sims, steps, noGrid) {
     var cur = pvCopy(b), P = 0;
     PVP_STATS.forEach(function (s) { P += cur.pts[s] || 0; });
     var sc = pvScoreOf(cur, pool, sims).score, evals = 1;
     // A coarse look at every split in tenths of the points first, so the
     // climb starts on the right hill.
     var U = 10, q = Math.floor(P / U);
-    if (q > 0) for (var a = 0; a <= U; a++) for (var bb = 0; a + bb <= U; bb++) for (var c = 0; a + bb + c <= U; c++) {
+    if (q > 0 && !noGrid) for (var a = 0; a <= U; a++) for (var bb = 0; a + bb <= U; bb++) for (var c = 0; a + bb + c <= U; c++) {
       var g = pvCopy(cur);
       g.pts = { power: a * q, precision: bb * q, evasion: c * q, hull: P - (a + bb + c) * q };
       var gs = pvScoreOf(g, pool, sims).score; evals++;
@@ -1123,7 +1123,7 @@
     var sizes = (steps || [20, 40, 80]).map(function (d) { return Math.max(1, Math.round(P / d)); })
       .filter(function (x, i, a) { return a.indexOf(x) === i; });
     sizes.forEach(function (step, si) {
-      if (step >= q && si > 0) return;
+      if (!noGrid && step >= q && si > 0) return;
       for (var pass = 0; pass < 6; pass++) {
         var best = null, bs = sc;
         PVP_STATS.forEach(function (from) {
@@ -1182,7 +1182,7 @@
       var live = pvSample(liveAll, PV_SEARCH_MAX);   // a sample of them: what the search runs on
       plan.searched = live.length;
 
-      // The split of points and each piece's active stat from the formula...
+      // The split of points and each piece's stat, tuned by simulated duels...
       var cand = pvClimb(pvBestAssign(pv, ref), live, PV_CLIMB_SIMS);
       // ...then the skills by running the duels. Stun and Focus lose at equal
       // budget whatever they are paired with (the self-play meta), so sets
@@ -1199,17 +1199,23 @@
       quick.sort(function (x, y) { return y.m - x.m; });
       var short = quick.slice(0, 5);
       if (!short.some(function (x) { return x.key === curKey; })) short.push(quick.filter(function (x) { return x.key === curKey; })[0] || quick[0]);
-      // The finalists are close together, which is exactly when a small
-      // sample misleads, and there are only six of them: settle it on
-      // every contested opponent.
-      short.forEach(function (x) { x.m = pvScoreOf(withSkills(x.comp), liveAll, 600).score; });
+      // Stats and skills are tested together: each finalist skill set gets
+      // its own split, climbed from the one found above (a Block set wants
+      // a different split from a DoT set). The finalists are close
+      // together, which is exactly when a small sample misleads, so the
+      // result is settled on every contested opponent.
+      short.forEach(function (x) {
+        x.b = pvClimb(withSkills(x.comp), live, PV_CLIMB_SIMS, [20, 40, 80], true);
+        x.m = pvScoreOf(x.b, liveAll, 600).score;
+      });
       short.sort(function (x, y) { return y.m - x.m; });
       // The winner, with the current skills kept when it is a tie, and each
       // piece keeping its own skill where the winning set still has it.
       var cur = short.filter(function (x) { return x.key === curKey; })[0];
       var pick = cur && cur.m >= short[0].m - 0.8 ? cur : short[0];   // inside the noise: keep what is there
+      cand = pick.b;
       var left = pick.comp.slice(), out = new Array(cand.gear.length);
-      cand.gear.forEach(function (g, i) { var j = left.indexOf(g.skill); if (j >= 0) { out[i] = g.skill; left.splice(j, 1); } });
+      curSkills.forEach(function (sk, i) { var j = left.indexOf(sk); if (j >= 0) { out[i] = sk; left.splice(j, 1); } });
       for (var i = 0; i < out.length; i++) if (out[i] === undefined) out[i] = left.shift();
       cand.gear.forEach(function (g, i) { g.skill = out[i]; });
 

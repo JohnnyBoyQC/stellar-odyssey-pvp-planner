@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stellar Odyssey – PvP Meta
 // @namespace    stellarodyssey-pvpmeta
-// @version      1.3.1
+// @version      1.3.2
 // @description  Arena build planner for Stellar Odyssey: the meta split at your own total stat, the best free re-spec, which upgrades pay, and a record of your duels. Built from Astrolabe 3.22.9's simulator. Keeps the squadron battles, arena duels and roster you browse, and opens them in the web planner in one click (player and squadron picker). Reads the page only: no network requests, no game actions.
 // @match        *://steam.stellarodyssey.app/*
 // @grant        GM_getValue
@@ -446,14 +446,14 @@
      first, then steps of 1/20, 1/40 and 1/80. About 2 seconds. */
   var PV_CLIMB_SIMS = 400;
 
-  function pvClimb(b, pool, sims, steps) {
+  function pvClimb(b, pool, sims, steps, noGrid) {
     var cur = pvCopy(b), P = 0;
     PVP_STATS.forEach(function (s) { P += cur.pts[s] || 0; });
     var sc = pvScoreOf(cur, pool, sims).score, evals = 1;
     // A coarse look at every split in tenths of the points first, so the
     // climb starts on the right hill.
     var U = 10, q = Math.floor(P / U);
-    if (q > 0) for (var a = 0; a <= U; a++) for (var bb = 0; a + bb <= U; bb++) for (var c = 0; a + bb + c <= U; c++) {
+    if (q > 0 && !noGrid) for (var a = 0; a <= U; a++) for (var bb = 0; a + bb <= U; bb++) for (var c = 0; a + bb + c <= U; c++) {
       var g = pvCopy(cur);
       g.pts = { power: a * q, precision: bb * q, evasion: c * q, hull: P - (a + bb + c) * q };
       var gs = pvScoreOf(g, pool, sims).score; evals++;
@@ -462,7 +462,7 @@
     var sizes = (steps || [20, 40, 80]).map(function (d) { return Math.max(1, Math.round(P / d)); })
       .filter(function (x, i, a) { return a.indexOf(x) === i; });
     sizes.forEach(function (step, si) {
-      if (step >= q && si > 0) return;
+      if (!noGrid && step >= q && si > 0) return;
       for (var pass = 0; pass < 6; pass++) {
         var best = null, bs = sc;
         PVP_STATS.forEach(function (from) {
@@ -521,7 +521,7 @@
       var live = pvSample(liveAll, PV_SEARCH_MAX);   // a sample of them: what the search runs on
       plan.searched = live.length;
 
-      // The split of points and each piece's active stat from the formula...
+      // The split of points and each piece's stat, tuned by simulated duels...
       var cand = pvClimb(pvBestAssign(pv, ref), live, PV_CLIMB_SIMS);
       // ...then the skills by running the duels. Stun and Focus lose at equal
       // budget whatever they are paired with (the self-play meta), so sets
@@ -538,17 +538,23 @@
       quick.sort(function (x, y) { return y.m - x.m; });
       var short = quick.slice(0, 5);
       if (!short.some(function (x) { return x.key === curKey; })) short.push(quick.filter(function (x) { return x.key === curKey; })[0] || quick[0]);
-      // The finalists are close together, which is exactly when a small
-      // sample misleads, and there are only six of them: settle it on
-      // every contested opponent.
-      short.forEach(function (x) { x.m = pvScoreOf(withSkills(x.comp), liveAll, 600).score; });
+      // Stats and skills are tested together: each finalist skill set gets
+      // its own split, climbed from the one found above (a Block set wants
+      // a different split from a DoT set). The finalists are close
+      // together, which is exactly when a small sample misleads, so the
+      // result is settled on every contested opponent.
+      short.forEach(function (x) {
+        x.b = pvClimb(withSkills(x.comp), live, PV_CLIMB_SIMS, [20, 40, 80], true);
+        x.m = pvScoreOf(x.b, liveAll, 600).score;
+      });
       short.sort(function (x, y) { return y.m - x.m; });
       // The winner, with the current skills kept when it is a tie, and each
       // piece keeping its own skill where the winning set still has it.
       var cur = short.filter(function (x) { return x.key === curKey; })[0];
       var pick = cur && cur.m >= short[0].m - 0.8 ? cur : short[0];   // inside the noise: keep what is there
+      cand = pick.b;
       var left = pick.comp.slice(), out = new Array(cand.gear.length);
-      cand.gear.forEach(function (g, i) { var j = left.indexOf(g.skill); if (j >= 0) { out[i] = g.skill; left.splice(j, 1); } });
+      curSkills.forEach(function (sk, i) { var j = left.indexOf(sk); if (j >= 0) { out[i] = sk; left.splice(j, 1); } });
       for (var i = 0; i < out.length; i++) if (out[i] === undefined) out[i] = left.shift();
       cand.gear.forEach(function (g, i) { g.skill = out[i]; });
 
