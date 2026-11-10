@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PvP Build Planner (beta)</title>
-<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.8.0">
+<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.8.1">
 </head>
 <body>
 <script>
 (function () {
   'use strict';
-  var PAGE_VER = "1.8.0";
+  var PAGE_VER = "1.8.1";
   var GRAB_SRC = "(function () {\nif (window.__sopvpGrab) { window.__sopvpGrab.show(); return; }\nvar PL = 'https://johnnyboyqc.github.io/stellar-odyssey-pvp-planner/', OR = 'https://johnnyboyqc.github.io';\nvar G = { squad: {}, roster: null, duels: {}, list: {}, box: null };\nvar RE = /\\/api\\/(squadrons\\/(battlelog|groups)|battlefield\\/arenaduels)(\\?|$)/;\nfunction abs(u) { try { return new URL(String((u && u.href) || u), location.href).href; } catch (e) { return String(u); } }\nfunction take(url, text) {\nvar b;\ntry { b = JSON.parse(text); } catch (e) { return; }\nif (/battlelog/.test(url)) (b && b.battles || []).forEach(function (x) { if (x && x._id && Array.isArray(x.logs)) G.squad[x._id] = x; });\nelse if (/arenaduels/.test(url)) (b && b.results || []).forEach(function (x) { if (x && x._id && x.attackerName && x.defenderName) G.list[x._id] = x; });\nelse G.roster = { t: Date.now(), body: text };\ndraw();\n}\nvar XP = XMLHttpRequest.prototype, oO = XP.open, oS = XP.send;\nXP.open = function (m, u) { try { this.__sopvpG = abs(u); } catch (e) {} return oO.apply(this, arguments); };\nXP.send = function () {\nvar x = this;\ntry {\nif (RE.test(x.__sopvpG || '')) x.addEventListener('load', function () {\ntry {\nif (x.status < 200 || x.status >= 300) return;\nvar t = (x.responseType === '' || x.responseType === 'text') ? x.responseText : (x.responseType === 'json' ? JSON.stringify(x.response) : null);\nif (t) take(x.responseURL || x.__sopvpG, t);\n} catch (e) {}\n});\n} catch (e) {}\nreturn oS.apply(this, arguments);\n};\nvar oF = window.fetch;\nif (typeof oF === 'function') window.fetch = function (i) {\nvar p = oF.apply(this, arguments);\ntry {\nvar u = abs(typeof i === 'string' ? i : (i && i.url));\nif (RE.test(u)) p.then(function (r) { if (r.ok) r.clone().text().then(function (t) { take(r.url || u, t); }, function () {}); }, function () {});\n} catch (e) {}\nreturn p;\n};\nfunction state() {\ntry {\nvar el = document.querySelector('#q-app') || document.querySelector('#app'), a = el && el.__vue_app__;\nvar p = a && a.config && a.config.globalProperties && a.config.globalProperties.$pinia;\nreturn p && p.state && p.state.value;\n} catch (e) { return null; }\n}\nfunction copy(o) { try { return JSON.parse(JSON.stringify(o)); } catch (e) { return null; } }\nfunction tick() {\nvar st = state();\nif (!st) return;\ntry {\nvar A = st.PvPArenaStore, d = A && A.currentDuel;\nif (d && d._id && d.logs && d.logs.length && !G.duels[d._id]) { G.duels[d._id] = copy(d); draw(); }\nvar s = st.squadronStore;\nif (!G.roster && s && s.group1 && s.group1.length) { G.roster = { t: Date.now(), body: JSON.stringify({ squad: [{ group1: copy(s.group1), group2: copy(s.group2 || []), group3: copy(s.group3 || []), available: [] }] }) }; draw(); }\n} catch (e) {}\n}\nsetInterval(tick, 1000);\nfunction build(st) {\ntry {\nvar U = st.UserStore, P = U.player, mats = {};\n(P.pvp_gear || []).forEach(function (g) { mats[String(g.statCost || '').toLowerCase()] = 1; });\nvar slots = (st.PetsStore && st.PetsStore.petSlots) || [], inSlot = {};\nslots.forEach(function (x) { if (x && x.pet) inSlot[x.pet] = 1; });\nreturn {\nUserStore: { username: U.username, pvp_badges: U.pvp_badges, player: copy({ pvp_gear: P.pvp_gear, pvpstats: P.pvpstats, clones: P.clones }) },\nCraftStore: { crafting_level: st.CraftStore && st.CraftStore.crafting_level },\nMaterialsStore: { materialsList: ((st.MaterialsStore && st.MaterialsStore.materialsList) || []).filter(function (m) { var n = m && m.item && (m.item.name || m.item); return n && mats[String(n).toLowerCase()]; }).map(function (m) { return { item: { name: m.item.name || m.item }, quantity: m.quantity }; }) },\nPetsStore: { petSlots: slots.filter(function (x) { return x && x.pet; }).map(function (x) { return { pet: x.pet }; }), pets: ((st.PetsStore && st.PetsStore.pets) || []).filter(function (p) { return p && inSlot[p._id] && p.name === 'Velari'; }).map(function (p) { return { _id: p._id, name: p.name, level: p.level }; }) }\n};\n} catch (e) { return null; }\n}\nfunction payload() {\nvar st = state();\nreturn { app: 'PvP Planner button', v: 1, made: Date.now(), me: st && st.UserStore ? st.UserStore.username : null, build: st ? build(st) : null,\nsquad: Object.keys(G.squad).map(function (k) { return { battle: G.squad[k] }; }),\nduel: Object.keys(G.duels).map(function (k) { return { duel: G.duels[k], saved: Date.now() }; }),\nduelList: Object.keys(G.list).map(function (k) { return { row: G.list[k] }; }),\nroster: G.roster ? [G.roster] : [] };\n}\nfunction send() {\nvar nonce = String(Math.random()).slice(2), w = window.open(PL + '#wait=' + nonce, '_blank');\nif (!w) { alert(L.p); return; }\nwindow.addEventListener('message', function on(e) {\nif (e.origin !== OR || !e.data || e.data.sopvpReady !== nonce || e.source !== w) return;\nwindow.removeEventListener('message', on);\ne.source.postMessage({ sopvpRaw: payload(), nonce: nonce }, OR);\n});\n}\nvar L = (function () {\nvar n = String((navigator.languages && navigator.languages[0]) || navigator.language || 'en').toLowerCase();\nvar T = {\nes: { b: 'batallas de escuadrón', d: 'duelos de arena abiertos', l: 'en la lista de arena', r: 'plantilla', y: 'sí', n: 'todavía no', h: 'Ahora recorre Registro de peleas › Escuadrón (50 por página, todas las páginas), abre Registro de peleas › Arena y abre Grupos de escuadrón. Ver pelea solo hace falta para rivales nunca vistos en una batalla de escuadrón. Deja esta pestaña abierta.', s: 'Enviar al planificador ↗', p: 'El navegador bloqueó la pestaña nueva: permite las ventanas emergentes de este sitio y vuelve a pulsar Enviar.' },\nzh: { b: '场舰队战斗', d: '场已打开的竞技场决斗', l: '条竞技场列表记录', r: '名单', y: '已有', n: '还没有', h: '现在浏览 战斗日志 › 舰队（每页 50 条，每一页都看），打开 战斗日志 › 竞技场，再打开舰队编组。只有从未在舰队战斗中见过的对手才需要点击查看战斗。请保持此标签页打开。', s: '发送到规划器 ↗', p: '浏览器拦截了新标签页：请允许本网站弹出窗口后再点一次发送。' },\nen: { b: 'squadron battles', d: 'arena duels opened', l: 'in the Arena list', r: 'roster', y: 'yes', n: 'not yet', h: 'Now browse Battle Log › Squadron (50 per page, every page), open Battle Log › Arena, and open Squadron Groups. View battle is only needed for opponents never seen in a squadron battle. Keep this tab open.', s: 'Send to planner ↗', p: 'The browser blocked the new tab: allow pop-ups for this site, then click Send again.' }\n};\nreturn T[n.indexOf('es') === 0 ? 'es' : (n.indexOf('zh') === 0 ? 'zh' : 'en')];\n})();\nfunction draw() {\nif (!G.box) return;\nvar n = Object.keys(G.squad).length, d = Object.keys(G.duels).length, l = Object.keys(G.list).length;\nG.box.querySelector('.c').textContent = n + ' ' + L.b + ', ' + l + ' ' + L.l + ', ' + d + ' ' + L.d + ', ' + L.r + ': ' + (G.roster ? L.y : L.n);\n}\nfunction show() {\nif (G.box) { G.box.style.display = 'block'; return; }\nvar b = document.createElement('div');\nb.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;background:#1a2129;color:#d5dde6;border:1px solid #4fb3e8;border-radius:10px;padding:10px 12px;font:13px sans-serif;max-width:300px;box-shadow:0 4px 16px rgba(0,0,0,.4)';\nb.innerHTML = '<b>PvP Planner<\/b> <span style=\"float:right;cursor:pointer\" class=\"x\">✕<\/span><div class=\"c\" style=\"margin:6px 0\"><\/div>' +\n'<div class=\"h\" style=\"font-size:11px;color:#9aa8b6;margin-bottom:8px\"><\/div>' +\n'<button class=\"s\" style=\"background:#4fb3e8;color:#0d1b24;border:0;border-radius:7px;padding:6px 12px;font-weight:600;cursor:pointer\"><\/button>';\nb.querySelector('.s').textContent = L.s;\nb.querySelector('.h').textContent = L.h;\nb.querySelector('.x').onclick = function () { b.style.display = 'none'; };\nb.querySelector('.s').onclick = send;\ndocument.body.appendChild(b);\nG.box = b; draw();\n}\nwindow.__sopvpGrab = { show: show, data: G };\ntick(); show();\n})();";
 
   /* ============================================================
@@ -101,6 +101,9 @@
       'Against the members of {0}, one at a time; win rate good to about ±{1} points.': 'Contra los miembros de {0}, uno a uno; tasa de victoria fiable a unos ±{1} puntos.',
       'for Stellar Odyssey · fan-made': 'para Stellar Odyssey · hecho por fans',
       'theme': 'tema',
+      'Big roster: the search was stopped after {0} seconds, so this is the best found so far. Run it again to look further from your current groups.': 'Plantilla grande: la búsqueda se detuvo tras {0} segundos, así que esto es lo mejor encontrado hasta ahora. Ejecútala de nuevo para buscar más a partir de tus grupos actuales.',
+      'Working: the answer takes 10 to 60 seconds.': 'Trabajando: la respuesta tarda de 10 a 60 segundos.',
+      'Group full ({0})': 'Grupo completo ({0})',
       'Move members between groups here, then click Check my groups above. Nothing changes in the game.': 'Mueve miembros entre grupos aquí y luego pulsa Comprobar mis grupos arriba. Nada cambia en el juego.',
       'Change my groups': 'Cambiar mis grupos',
       'Your groups, as tested': 'Tus grupos, tal como se probaron',
@@ -557,6 +560,9 @@
       'Against the members of {0}, one at a time; win rate good to about ±{1} points.': '对阵 {0} 的成员，逐一对战；胜率误差约 ±{1} 个百分点。',
       'for Stellar Odyssey · fan-made': 'Stellar Odyssey · 玩家制作',
       'theme': '主题',
+      'Big roster: the search was stopped after {0} seconds, so this is the best found so far. Run it again to look further from your current groups.': '名单较大：搜索在 {0} 秒后停止，因此这是目前找到的最佳方案。再次运行可从你当前的编组继续寻找。',
+      'Working: the answer takes 10 to 60 seconds.': '计算中：需要 10 到 60 秒。',
+      'Group full ({0})': '编组已满（{0}）',
       'Move members between groups here, then click Check my groups above. Nothing changes in the game.': '在这里调整各编组的成员，然后点击上方的检查我的编组。游戏中不会有任何改动。',
       'Change my groups': '调整我的编组',
       'Your groups, as tested': '你的编组（测试时）',
@@ -1056,7 +1062,8 @@
       PV_CONTESTED: PV_CONTESTED, PV_DECIDED: PV_DECIDED, PV_FLOOR: PV_FLOOR, PV_MAX_BATTLES: PV_MAX_BATTLES, PV_MIN_EACH: PV_MIN_EACH,
       PV_SEARCH_MAX: PV_SEARCH_MAX, PV_SEED: PV_SEED, PV_SIMS: PV_SIMS,
       PV_META: PV_META, PV_META_COPIES: PV_META_COPIES,
-      RL_A: RL_A, RL_B: RL_B, RL_MAX_CLONES: RL_MAX_CLONES, RL_MAX_ROUNDS: RL_MAX_ROUNDS, SQ_MAX_ROUNDS: SQ_MAX_ROUNDS, PV_CLIMB_SIMS: PV_CLIMB_SIMS, AR_PAIR: AR_PAIR
+      RL_A: RL_A, RL_B: RL_B, RL_MAX_CLONES: RL_MAX_CLONES, RL_MAX_ROUNDS: RL_MAX_ROUNDS, SQ_MAX_ROUNDS: SQ_MAX_ROUNDS, PV_CLIMB_SIMS: PV_CLIMB_SIMS, AR_PAIR: AR_PAIR,
+      GB_SIZE: GB_SIZE, GB_PERM_MAX: GB_PERM_MAX
     };
   }
   function WK_FNS() {
@@ -2049,7 +2056,8 @@
   /* ============================================================
      SQUADRON GROUP BUILDER (1.3.0)
 
-     Splits the members who will play into groups of up to four, and puts
+     Splits the members who will play into groups of 1 to 12 (the game's
+     limit; GB_SIZE), and puts
      each group in the order that wins most, against the enemy groups
      chosen: every pairing is fought by the relay simulator, half attacking
      and half defending. The score is the expected number of wins over all
@@ -2108,18 +2116,34 @@
     return out;
   }
   function gbStr(m) { return m.dmg * m.hp * m.N * m.N; }
+  var GB_SIZE = 12;        // members a group can hold in the game
+  var GB_PERM_MAX = 5;     // up to this many members, every order is tried (5! = 120)
 
-  // The best order of one group: every order when quick is false, else the
-  // two simple ones (weakest first, strongest first).
-  function gbOrder(G, enemies, sims, seed, quick) {
+  // The best order of one group. quick: the two simple orders (weakest
+  // first, strongest first). Otherwise every order for a small group; a
+  // larger one (12 members have 479 million orders) starts from the better
+  // simple order and keeps any move of one member to another place that
+  // wins more, until none does.
+  function gbOrder(G, enemies, sims, seed, quick, until) {
     if (G.length <= 1) return { g: G.slice(), p: gbGroup(G, enemies, sims, seed).p };
-    var cands;
-    if (quick) {
-      var up = G.slice().sort(function (a, b) { return gbStr(a) - gbStr(b); });
-      cands = [up, up.slice().reverse()];
-    } else cands = gbPerms(G.length).map(function (pm) { return pm.map(function (i) { return G[i]; }); });
+    var up = G.slice().sort(function (a, b) { return gbStr(a) - gbStr(b); });
+    var cands = quick || G.length > GB_PERM_MAX ? [up, up.slice().reverse()] : gbPerms(G.length).map(function (pm) { return pm.map(function (i) { return G[i]; }); });
     var best = null;
     cands.forEach(function (c) { var p = gbGroup(c, enemies, sims, seed).p; if (!best || p > best.p + 1e-9) best = { g: c, p: p }; });
+    if (quick || G.length <= GB_PERM_MAX) return best;
+    for (var pass = 0, moved = true; moved && pass < 3; pass++) {
+      moved = false;
+      for (var i = 0; i < G.length; i++) {
+        if (until && Date.now() > until) return best;   // out of time: the best order so far
+        for (var j = 0; j < G.length; j++) {
+          if (i === j) continue;
+          var c = best.g.slice(), m = c.splice(i, 1)[0];
+          c.splice(j, 0, m);
+          var p = gbGroup(c, enemies, sims, seed).p;
+          if (p > best.p + 0.004) { best = { g: c, p: p }; moved = true; }
+        }
+      }
+    }
     return best;
   }
 
@@ -2130,7 +2154,14 @@
   // now: matrix of the current groups, gain}.
   function gbOptimise(pool, start, enemies, opt, progress) {
     opt = opt || {};
-    var size = opt.size || 4, nG = opt.groups || 3, simsQ = opt.simsQuick || 40, simsO = opt.simsOrder || 80, simsF = opt.simsFinal || 400, seed = opt.seed || 17;
+    var size = opt.size || GB_SIZE, nG = opt.groups || 3, simsQ = opt.simsQuick || 40, simsO = opt.simsOrder || 80, simsF = opt.simsFinal || 400, seed = opt.seed || 17;
+    // A big roster means many more lineups and longer fights: fewer fights
+    // per try, and a time limit (opt.budgetMs) after which the best found so
+    // far is kept. A roster of 12 or fewer is searched as before.
+    var big = Math.max(1, pool.length / 12), t0 = Date.now(), budget = opt.budgetMs || 45000, partial = false;
+    if (!opt.simsQuick) simsQ = Math.max(12, Math.round(simsQ / big));
+    if (!opt.simsOrder) simsO = Math.max(24, Math.round(simsO / big));
+    var swapUntil = t0 + budget * 0.6, orderUntil = t0 + budget;
     var byId = {};
     pool.forEach(function (m) { byId[m.id] = m; });
     var groups = [], used = {};
@@ -2151,13 +2182,14 @@
     var cur = groups.map(q), evals = groups.length;
     // Swaps: any two members of different groups, or a member and a benched one.
     var improved = true, pass = 0;
-    while (improved && pass < (opt.passes || 4)) {
+    while (improved && !partial && pass < (opt.passes || 4)) {
       improved = false; pass++;
-      for (var a = 0; a < nG; a++) {
-        for (var b = a; b <= nG; b++) {   // b === nG is the bench
+      for (var a = 0; a < nG && !partial; a++) {
+        for (var b = a; b <= nG && !partial; b++) {   // b === nG is the bench
           var A = groups[a], B = b === nG ? bench : groups[b];
           if (b === a) continue;
           for (var i = 0; i < A.length; i++) {
+            if (Date.now() > swapUntil) { partial = true; break; }
             for (var j = 0; j <= B.length; j++) {
               // j === B.length: move A[i] into B when B has room (not the bench)
               if (j === B.length && (b === nG || B.length >= size || A.length <= 1)) continue;
@@ -2178,12 +2210,13 @@
       }
     }
     // Each group in its best order, from every possible order.
-    var final = groups.map(function (G, k) { if (progress) progress('Choosing the order of group ' + (k + 1)); return gbOrder(G, enemies, simsO, seed + 1, false).g; });
+    var final = groups.map(function (G, k) { if (progress) progress('Choosing the order of group ' + (k + 1)); return gbOrder(G, enemies, simsO, seed + 1, false, orderUntil).g; });
+    if (Date.now() > orderUntil) partial = true;
     if (progress) progress('Final check with ' + simsF + ' fights per pairing');
     var matrix = final.map(function (G) { return gbGroup(G, enemies, simsF, seed + 2); });
     var now = startGroups.map(function (G) { return gbGroup(G, enemies, simsF, seed + 2); });
     var sum = function (M) { return M.reduce(function (s, x) { return s + x.p; }, 0); };
-    return { groups: final, bench: bench, matrix: matrix, now: now, start: startGroups, gain: (sum(matrix) - sum(now)) / Math.max(1, nG), evals: evals };
+    return { groups: final, bench: bench, matrix: matrix, now: now, start: startGroups, gain: (sum(matrix) - sum(now)) / Math.max(1, nG), evals: evals, partial: partial, secs: Math.round((Date.now() - t0) / 1000) };
   }
 
   /* ============================================================
@@ -3080,7 +3113,7 @@
       var others = ros.filter(function (m) { return g.indexOf(m) < 0; });
       h += '<div class="sqcol" data-g="' + (gi + 1) + '"><h4>' + esc(t('Group {0}', [gi + 1])) + '</h4>' +
         '<div class="chips">' + sqgChip('Damage', sqgK(dmg)) + sqgChip('HP', sqgK(hp)) + '</div>' +
-        '<select data-add="' + (gi + 1) + '"' + (g.length >= 4 ? ' disabled' : '') + '><option value="">' + esc(t(g.length >= 4 ? 'Group full (4)' : 'Select member')) + '</option>' +
+        '<select data-add="' + (gi + 1) + '"' + (g.length >= GB_SIZE ? ' disabled' : '') + '><option value="">' + esc(g.length >= GB_SIZE ? t('Group full ({0})', [GB_SIZE]) : t('Select member')) + '</option>' +
         others.map(function (m) { return '<option value="' + esc(m.user) + '">' + esc(m.user) + (placed[m.user] ? ' (' + esc(t('in another group')) + ')' : '') + '</option>'; }).join('') + '</select>' +
         '<div style="height:8px"></div>' +
         (g.length ? g.map(function (m, k) { return sqgCard(m, k + 1, g.length); }).join('') : '<div class="mu">' + esc(t('(empty)')) + '</div>') + '</div>';
@@ -3129,8 +3162,8 @@
     var pool = ros.filter(sqgPlays).map(sqgOwnMember);
     if (!pool.length || !foes.length) { SQ_MSG = !pool.length ? 'Nobody is ticked to play.' : 'Tick at least one enemy group.'; renderSq(); return; }
     var start = [1, 2, 3].map(function (g) { return ros.filter(function (m) { return m.g === g && sqgPlays(m); }).sort(function (a, b) { return a.pos - b.pos; }).map(function (m) { return m.user; }); });
-    var job = { kind: 'gb', pool: pool, start: start, enemies: foes.map(sqgFoeTeam), opt: { groups: 3, size: 4, now: sqgNowGroups().map(function (G) { return G.map(sqgOwnMember); }) } };
-    SQ_BUSY = true; SQ_MSG = 'Working: the first answer takes 10 to 40 seconds.'; SQ_RES = null; renderSq();
+    var job = { kind: 'gb', pool: pool, start: start, enemies: foes.map(sqgFoeTeam), opt: { groups: 3, size: GB_SIZE, now: sqgNowGroups().map(function (G) { return G.map(sqgOwnMember); }) } };
+    SQ_BUSY = true; SQ_MSG = 'Working: the answer takes 10 to 60 seconds.'; SQ_RES = null; renderSq();
     var done = function (res, err) {
       SQ_BUSY = false; SQ_W = null;
       if (err || !res) SQ_MSG = 'The group builder failed: ' + (err || 'no answer');
@@ -3204,6 +3237,7 @@
       var gain = Math.round(r.gain * 100);
       h += line(gain > 0 ? t('The suggested groups: +{0} points of average win chance over the current ones.', [gain]) : t('Your current groups are already as good as anything found.'), gain > 0 ? 'good' : 'mu');
       h += line(t('In brackets: attacking / defending. ± is the doubt left by luck and by the estimates of the enemy.'), 'mu');
+      if (r.partial) h += line(t('Big roster: the search was stopped after {0} seconds, so this is the best found so far. Run it again to look further from your current groups.', [r.secs]), 'warn');
       h += '<div class="btns"><button class="sec" id="b_sqcopy">' + esc(t('Copy for chat')) + '</button><button class="sec" id="b_sqtake">' + esc(t('Edit these groups myself')) + '</button></div>';
       h += '<textarea id="sqtxt" readonly style="position:absolute;left:-9999px;top:0;width:10px;height:10px">' + esc(sqgText(SQ_RES)) + '</textarea>';
     }
@@ -3259,7 +3293,7 @@
       c.addEventListener('change', function () {
         if (!c.value) return;
         var gi = +c.getAttribute('data-add') - 1, G = without(sqgMyGroups(), c.value);
-        if (G[gi].length < 4) G[gi].push(byUser[c.value]);
+        if (G[gi].length < GB_SIZE) G[gi].push(byUser[c.value]);
         sqgWrite(G);
       });
     });
