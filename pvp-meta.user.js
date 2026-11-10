@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stellar Odyssey – PvP Meta
 // @namespace    stellarodyssey-pvpmeta
-// @version      1.3.7
+// @version      1.3.8
 // @description  Arena build planner for Stellar Odyssey: the meta split at your own total stat, the best free re-spec, which upgrades pay, and a record of your duels. Built from Astrolabe 3.22.9's simulator. Keeps the squadron battles, arena duels and roster you browse, and opens them in the web planner in one click (player and squadron picker). Reads the page only: no network requests, no game actions.
 // @match        *://steam.stellarodyssey.app/*
 // @grant        GM_getValue
@@ -399,6 +399,9 @@
       var body; try { body = typeof r.body === 'string' ? JSON.parse(r.body) : r.body; } catch (e) { body = null; }
       return { t: r.t || 0, m: pxRoster(body) };
     }).filter(function (r) { return r.m.length; }).sort(function (x, y) { return x.t - y.t; });
+    // The shared store holds every visitor's roster: only the ones with our
+    // own name in them are ours (all of them when our name is not known).
+    if (me) { var mine = rosters.filter(function (r) { return r.m.some(function (m) { return m.user === me; }); }); if (mine.length) rosters = mine; }
     function rosterAt(t) {
       if (!rosters.length) return null;
       var pick = rosters[0];
@@ -811,12 +814,41 @@
     };
   }
 
+  // The squadron's member list: the game page always holds it (names only).
+  function sqNames(st) {
+    try {
+      var q = st.UserStore.squadron;
+      if (!q || !Array.isArray(q.members) || !q.members.length) return [];
+      return [{ t: Date.now(), sq: String(q.name || ''), names: q.members.map(function (m) { return m && m.username ? String(m.username) : null; }).filter(Boolean).slice(0, 300) }];
+    } catch (e) { return []; }
+  }
+  // Squadron Groups as the page shows it right now (every member's PvP
+  // points, gear and clones), once that tab has been opened. Members who are
+  // in no group come from the game's last answer (lastBody), which lists them.
+  function sqLive(st, lastBody) {
+    try {
+      var s = st.squadronStore;
+      if (!s || !Array.isArray(s.group1)) return null;
+      var gs = [s.group1, s.group2 || [], s.group3 || []], n = 0, inG = {};
+      gs.forEach(function (g) { g.forEach(function (m) { if (m && m.username && m.pvpstats) { n++; inG[m.username] = 1; } }); });
+      if (!n) return null;
+      var av = Array.isArray(s.available) ? s.available : null;
+      if (!av && lastBody) { try { var b = JSON.parse(lastBody), q = Array.isArray(b.squad) ? b.squad[0] : b; av = (q.available || []).filter(function (m) { return m && m.username && !inG[m.username]; }); } catch (e) { av = null; } }
+      return { t: Date.now(), body: JSON.stringify({ squad: [{ group1: gs[0], group2: gs[1], group3: gs[2], available: av || [] }] }) };
+    } catch (e) { return null; }
+  }
+
   function plPayload() {
     var st = recState() || S.storeState, me = st && st.UserStore && st.UserStore.username, pv = st ? readPvp(st) : null;
     var get = function (s) { return arcTx(s, 'readonly', function (os) { return os.getAll(); }).catch(function () { return []; }); };
     return Promise.all([get('squad'), get('duel'), get('roster'), get('duelList')]).then(function (all) {
       var mine = function (x) { return x && x.realm === REALM; };
       var squad = all[0].filter(mine), duels = all[1].filter(mine), roster = all[2].filter(mine);
+      // The page's own state right now: the member list, and Squadron Groups
+      // as it stands (newer than the last answer kept, e.g. after moving members).
+      var live = recState(), mem = live ? sqNames(live) : [];
+      var now = live ? sqLive(live, roster.length ? roster.slice().sort(function (p, q) { return p.t - q.t; })[roster.length - 1].body : null) : null;
+      if (now) roster = roster.concat([{ t: now.t, realm: REALM, body: now.body }]);
       // The Arena list rows (who won, both Elo; no log), made small.
       var dlist = all[3].filter(mine).map(function (x) {
         var r = x.row;
@@ -842,7 +874,7 @@
       // raw: the battles and rosters themselves, so the page can add them up
       // with the squadron file and other imports (page 1.4.9 on).
       return { app: 'PvP Meta', v: 1, ver: scriptVersion(), realm: REALM, made: Date.now(), root: st ? plRoot(st) : null, duels: recs, x: x,
-        raw: { squad: squad.map(function (q) { return { realm: q.realm, saved: q.saved, battle: q.battle }; }), roster: roster.map(function (r) { return { t: r.t, body: r.body }; }), dlist: dlist } };
+        raw: { squad: squad.map(function (q) { return { realm: q.realm, saved: q.saved, battle: q.battle }; }), roster: roster.map(function (r) { return { t: r.t, body: r.body }; }), dlist: dlist, members: mem } };
     });
   }
 
