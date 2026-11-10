@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PvP Build Planner (beta)</title>
-<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.7.0">
+<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.8.0">
 </head>
 <body>
 <script>
 (function () {
   'use strict';
-  var PAGE_VER = "1.7.0";
+  var PAGE_VER = "1.8.0";
   var GRAB_SRC = "(function () {\nif (window.__sopvpGrab) { window.__sopvpGrab.show(); return; }\nvar PL = 'https://johnnyboyqc.github.io/stellar-odyssey-pvp-planner/', OR = 'https://johnnyboyqc.github.io';\nvar G = { squad: {}, roster: null, duels: {}, list: {}, box: null };\nvar RE = /\\/api\\/(squadrons\\/(battlelog|groups)|battlefield\\/arenaduels)(\\?|$)/;\nfunction abs(u) { try { return new URL(String((u && u.href) || u), location.href).href; } catch (e) { return String(u); } }\nfunction take(url, text) {\nvar b;\ntry { b = JSON.parse(text); } catch (e) { return; }\nif (/battlelog/.test(url)) (b && b.battles || []).forEach(function (x) { if (x && x._id && Array.isArray(x.logs)) G.squad[x._id] = x; });\nelse if (/arenaduels/.test(url)) (b && b.results || []).forEach(function (x) { if (x && x._id && x.attackerName && x.defenderName) G.list[x._id] = x; });\nelse G.roster = { t: Date.now(), body: text };\ndraw();\n}\nvar XP = XMLHttpRequest.prototype, oO = XP.open, oS = XP.send;\nXP.open = function (m, u) { try { this.__sopvpG = abs(u); } catch (e) {} return oO.apply(this, arguments); };\nXP.send = function () {\nvar x = this;\ntry {\nif (RE.test(x.__sopvpG || '')) x.addEventListener('load', function () {\ntry {\nif (x.status < 200 || x.status >= 300) return;\nvar t = (x.responseType === '' || x.responseType === 'text') ? x.responseText : (x.responseType === 'json' ? JSON.stringify(x.response) : null);\nif (t) take(x.responseURL || x.__sopvpG, t);\n} catch (e) {}\n});\n} catch (e) {}\nreturn oS.apply(this, arguments);\n};\nvar oF = window.fetch;\nif (typeof oF === 'function') window.fetch = function (i) {\nvar p = oF.apply(this, arguments);\ntry {\nvar u = abs(typeof i === 'string' ? i : (i && i.url));\nif (RE.test(u)) p.then(function (r) { if (r.ok) r.clone().text().then(function (t) { take(r.url || u, t); }, function () {}); }, function () {});\n} catch (e) {}\nreturn p;\n};\nfunction state() {\ntry {\nvar el = document.querySelector('#q-app') || document.querySelector('#app'), a = el && el.__vue_app__;\nvar p = a && a.config && a.config.globalProperties && a.config.globalProperties.$pinia;\nreturn p && p.state && p.state.value;\n} catch (e) { return null; }\n}\nfunction copy(o) { try { return JSON.parse(JSON.stringify(o)); } catch (e) { return null; } }\nfunction tick() {\nvar st = state();\nif (!st) return;\ntry {\nvar A = st.PvPArenaStore, d = A && A.currentDuel;\nif (d && d._id && d.logs && d.logs.length && !G.duels[d._id]) { G.duels[d._id] = copy(d); draw(); }\nvar s = st.squadronStore;\nif (!G.roster && s && s.group1 && s.group1.length) { G.roster = { t: Date.now(), body: JSON.stringify({ squad: [{ group1: copy(s.group1), group2: copy(s.group2 || []), group3: copy(s.group3 || []), available: [] }] }) }; draw(); }\n} catch (e) {}\n}\nsetInterval(tick, 1000);\nfunction build(st) {\ntry {\nvar U = st.UserStore, P = U.player, mats = {};\n(P.pvp_gear || []).forEach(function (g) { mats[String(g.statCost || '').toLowerCase()] = 1; });\nvar slots = (st.PetsStore && st.PetsStore.petSlots) || [], inSlot = {};\nslots.forEach(function (x) { if (x && x.pet) inSlot[x.pet] = 1; });\nreturn {\nUserStore: { username: U.username, pvp_badges: U.pvp_badges, player: copy({ pvp_gear: P.pvp_gear, pvpstats: P.pvpstats, clones: P.clones }) },\nCraftStore: { crafting_level: st.CraftStore && st.CraftStore.crafting_level },\nMaterialsStore: { materialsList: ((st.MaterialsStore && st.MaterialsStore.materialsList) || []).filter(function (m) { var n = m && m.item && (m.item.name || m.item); return n && mats[String(n).toLowerCase()]; }).map(function (m) { return { item: { name: m.item.name || m.item }, quantity: m.quantity }; }) },\nPetsStore: { petSlots: slots.filter(function (x) { return x && x.pet; }).map(function (x) { return { pet: x.pet }; }), pets: ((st.PetsStore && st.PetsStore.pets) || []).filter(function (p) { return p && inSlot[p._id] && p.name === 'Velari'; }).map(function (p) { return { _id: p._id, name: p.name, level: p.level }; }) }\n};\n} catch (e) { return null; }\n}\nfunction payload() {\nvar st = state();\nreturn { app: 'PvP Planner button', v: 1, made: Date.now(), me: st && st.UserStore ? st.UserStore.username : null, build: st ? build(st) : null,\nsquad: Object.keys(G.squad).map(function (k) { return { battle: G.squad[k] }; }),\nduel: Object.keys(G.duels).map(function (k) { return { duel: G.duels[k], saved: Date.now() }; }),\nduelList: Object.keys(G.list).map(function (k) { return { row: G.list[k] }; }),\nroster: G.roster ? [G.roster] : [] };\n}\nfunction send() {\nvar nonce = String(Math.random()).slice(2), w = window.open(PL + '#wait=' + nonce, '_blank');\nif (!w) { alert(L.p); return; }\nwindow.addEventListener('message', function on(e) {\nif (e.origin !== OR || !e.data || e.data.sopvpReady !== nonce || e.source !== w) return;\nwindow.removeEventListener('message', on);\ne.source.postMessage({ sopvpRaw: payload(), nonce: nonce }, OR);\n});\n}\nvar L = (function () {\nvar n = String((navigator.languages && navigator.languages[0]) || navigator.language || 'en').toLowerCase();\nvar T = {\nes: { b: 'batallas de escuadrón', d: 'duelos de arena abiertos', l: 'en la lista de arena', r: 'plantilla', y: 'sí', n: 'todavía no', h: 'Ahora recorre Registro de peleas › Escuadrón (50 por página, todas las páginas), abre Registro de peleas › Arena y abre Grupos de escuadrón. Ver pelea solo hace falta para rivales nunca vistos en una batalla de escuadrón. Deja esta pestaña abierta.', s: 'Enviar al planificador ↗', p: 'El navegador bloqueó la pestaña nueva: permite las ventanas emergentes de este sitio y vuelve a pulsar Enviar.' },\nzh: { b: '场舰队战斗', d: '场已打开的竞技场决斗', l: '条竞技场列表记录', r: '名单', y: '已有', n: '还没有', h: '现在浏览 战斗日志 › 舰队（每页 50 条，每一页都看），打开 战斗日志 › 竞技场，再打开舰队编组。只有从未在舰队战斗中见过的对手才需要点击查看战斗。请保持此标签页打开。', s: '发送到规划器 ↗', p: '浏览器拦截了新标签页：请允许本网站弹出窗口后再点一次发送。' },\nen: { b: 'squadron battles', d: 'arena duels opened', l: 'in the Arena list', r: 'roster', y: 'yes', n: 'not yet', h: 'Now browse Battle Log › Squadron (50 per page, every page), open Battle Log › Arena, and open Squadron Groups. View battle is only needed for opponents never seen in a squadron battle. Keep this tab open.', s: 'Send to planner ↗', p: 'The browser blocked the new tab: allow pop-ups for this site, then click Send again.' }\n};\nreturn T[n.indexOf('es') === 0 ? 'es' : (n.indexOf('zh') === 0 ? 'zh' : 'en')];\n})();\nfunction draw() {\nif (!G.box) return;\nvar n = Object.keys(G.squad).length, d = Object.keys(G.duels).length, l = Object.keys(G.list).length;\nG.box.querySelector('.c').textContent = n + ' ' + L.b + ', ' + l + ' ' + L.l + ', ' + d + ' ' + L.d + ', ' + L.r + ': ' + (G.roster ? L.y : L.n);\n}\nfunction show() {\nif (G.box) { G.box.style.display = 'block'; return; }\nvar b = document.createElement('div');\nb.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;background:#1a2129;color:#d5dde6;border:1px solid #4fb3e8;border-radius:10px;padding:10px 12px;font:13px sans-serif;max-width:300px;box-shadow:0 4px 16px rgba(0,0,0,.4)';\nb.innerHTML = '<b>PvP Planner<\/b> <span style=\"float:right;cursor:pointer\" class=\"x\">✕<\/span><div class=\"c\" style=\"margin:6px 0\"><\/div>' +\n'<div class=\"h\" style=\"font-size:11px;color:#9aa8b6;margin-bottom:8px\"><\/div>' +\n'<button class=\"s\" style=\"background:#4fb3e8;color:#0d1b24;border:0;border-radius:7px;padding:6px 12px;font-weight:600;cursor:pointer\"><\/button>';\nb.querySelector('.s').textContent = L.s;\nb.querySelector('.h').textContent = L.h;\nb.querySelector('.x').onclick = function () { b.style.display = 'none'; };\nb.querySelector('.s').onclick = send;\ndocument.body.appendChild(b);\nG.box = b; draw();\n}\nwindow.__sopvpGrab = { show: show, data: G };\ntick(); show();\n})();";
 
   /* ============================================================
@@ -101,6 +101,66 @@
       'Against the members of {0}, one at a time; win rate good to about ±{1} points.': 'Contra los miembros de {0}, uno a uno; tasa de victoria fiable a unos ±{1} puntos.',
       'for Stellar Odyssey · fan-made': 'para Stellar Odyssey · hecho por fans',
       'theme': 'tema',
+      'Move members between groups here, then click Check my groups above. Nothing changes in the game.': 'Mueve miembros entre grupos aquí y luego pulsa Comprobar mis grupos arriba. Nada cambia en el juego.',
+      'Change my groups': 'Cambiar mis grupos',
+      'Your groups, as tested': 'Tus grupos, tal como se probaron',
+      'Arena': 'Arena',
+      'Battlefield': 'Campo de batalla',
+      'Import': 'Importar',
+      'Simulated against {0} fights; the win chance is good to about ±{1} points.': 'Simulado contra {0} peleas; la probabilidad de ganar es fiable a unos ±{1} puntos.',
+      'With the best build': 'Con el mejor build',
+      'After the upgrades you can afford': 'Tras las mejoras que puedes pagar',
+      '{0} points, {1} upgrades': '{0} puntos, {1} mejoras',
+      'nothing affordable now': 'nada asequible ahora',
+      'Every opponent here always beats you or always loses to you: no change of build would alter a result.': 'Cada rival aquí siempre te gana o siempre pierde contra ti: ningún cambio de build alteraría un resultado.',
+      'Keep your build: the best change found is worth {0} points, inside the noise (±{1}).': 'Mantén tu build: el mejor cambio encontrado vale {0} puntos, dentro del ruido (±{1}).',
+      'Green: what to change. Free changes only (points, gear stats, skills).': 'Verde: lo que hay que cambiar. Solo cambios gratuitos (puntos, estadísticas del equipo, habilidades).',
+      'Buy now': 'Comprar ahora',
+      'Next upgrade': 'Siguiente mejora',
+      'Details': 'Detalles',
+      'Gain: points of win chance. Each fight is simulated half attacking, half defending.': 'Ganancia: puntos de probabilidad de ganar. Cada pelea se simula mitad atacando, mitad defendiendo.',
+      'no squadron known': 'sin escuadrón conocido',
+      'The average player at my strength': 'El jugador medio de mi fuerza',
+      'A whole squadron': 'Un escuadrón entero',
+      'Pick a player.': 'Elige un jugador.',
+      'Pick a squadron.': 'Elige un escuadrón.',
+      '{0}: precision {1}, evasion {2}, skills {3}; from {4} squadron battles and {5} duels.': '{0}: precisión {1}, evasión {2}, habilidades {3}; de {4} batallas de escuadrón y {5} duelos.',
+      'Every member of {0} seen in battles, one at a time, as arena duels.': 'Cada miembro de {0} visto en batallas, uno a uno, como duelos de arena.',
+      'Made-up rivals with your total stats, on the split that wins most.': 'Rivales inventados con tus estadísticas totales, con el reparto que más gana.',
+      'Win against': 'Ganar contra',
+      'Only {0} arena fights known, under the {1} needed: the plan uses the average player until then.': 'Solo se conocen {0} peleas de arena, menos de las {1} necesarias: hasta entonces el plan usa al jugador medio.',
+      'Their estimated build': 'Su build estimado',
+      'Nothing imported yet: see the steps below.': 'Nada importado todavía: mira los pasos de abajo.',
+      'No roster yet: open Squadron Groups once in the game.': 'Aún sin plantilla: abre Grupos de escuadrón una vez en el juego.',
+      'Share my imports with everyone (never my API key or materials)': 'Compartir mis importaciones con todos (nunca mi clave API ni mis materiales)',
+      'No fights yet: bring them in on the Import tab.': 'Aún sin peleas: tráelas en la pestaña Importar.',
+      'No roster yet: open Squadron Groups once in the game, then send to the planner again.': 'Aún sin plantilla: abre Grupos de escuadrón una vez en el juego y vuelve a enviar al planificador.',
+      'Win against (tick up to 3 enemy groups)': 'Ganar contra (marca hasta 3 grupos enemigos)',
+      'The suggested groups: +{0} points of average win chance over the current ones.': 'Los grupos sugeridos: +{0} puntos de probabilidad media de ganar sobre los actuales.',
+      'Your current groups are already as good as anything found.': 'Tus grupos actuales ya son tan buenos como cualquier cosa encontrada.',
+      'In brackets: attacking / defending. ± is the doubt left by luck and by the estimates of the enemy.': 'Entre paréntesis: atacando / defendiendo. ± es la duda que dejan la suerte y las estimaciones del enemigo.',
+      'Copy for chat': 'Copiar para el chat',
+      'Edit these groups myself': 'Editar estos grupos yo mismo',
+      'Who plays ({0} of {1})': 'Quién juega ({0} de {1})',
+      'Your roster as the game sent it {0}. Untick whoever will not be there.': 'Tu plantilla tal como la envió el juego {0}. Desmarca a quien no vaya a estar.',
+      'Build my own groups': 'Montar mis propios grupos',
+      'Compare with the groups as they are now': 'Comparar con los grupos tal como están ahora',
+      'now': 'ahora',
+      'inactive': 'inactivo',
+      'free': 'libre',
+      'All players': 'Todos los jugadores',
+      'More': 'Más',
+      'How to bring your fights in': 'Cómo traer tus peleas',
+      '<b>Script (best):</b> install <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">Tampermonkey</a>, then <a href="{0}" target="_blank" rel="noopener">PvP Meta</a>. In the game open Battlefield › Battle Log › Squadron (50 per page, every page), Battle Log › Arena and Squadron Groups. Then click <b>⚔ PvP Meta › Open in planner ↗</b>.': '<b>Script (lo mejor):</b> instala <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">Tampermonkey</a> y luego <a href="{0}" target="_blank" rel="noopener">PvP Meta</a>. En el juego abre Campo de batalla › Registro de peleas › Escuadrón (50 por página, todas las páginas), Registro de peleas › Arena y Grupos de escuadrón. Después pulsa <b>⚔ PvP Meta › Open in planner ↗</b>.',
+      '<b>No install:</b> drag this button to your bookmarks bar (Ctrl+Shift+B shows it):': '<b>Sin instalar nada:</b> arrastra este botón a tu barra de marcadores (Ctrl+Shift+B la muestra):',
+      'Click it on the game page, open the same three pages, then click <b>Send to planner</b>. Web browsers only, not the Steam app.': 'Púlsalo en la página del juego, abre las mismas tres páginas y pulsa <b>Enviar al planificador</b>. Solo en navegadores web, no en la app de Steam.',
+      '(for the F12 console, if bookmarks are not possible)': '(para la consola F12, si no puedes usar marcadores)',
+      '<b>Build only:</b> paste your API key below.': '<b>Solo el build:</b> pega tu clave API abajo.',
+      'Read-only: nothing here acts in the game. View battle on an arena duel is only needed for a player never seen in a squadron battle.': 'Solo lectura: nada aquí actúa en el juego. Ver pelea en un duelo de arena solo hace falta para un jugador nunca visto en una batalla de escuadrón.',
+      'The key goes only to the game\'s own API, from this browser. One load uses 1 of your 50 daily calls; a reload within 30 minutes is free.': 'La clave solo va a la API del propio juego, desde este navegador. Una carga usa 1 de tus 50 llamadas diarias; recargar en menos de 30 minutos es gratis.',
+      'Unofficial fan tool. Read-only: it cannot change anything in the game.': 'Herramienta no oficial hecha por fans. Solo lectura: no puede cambiar nada en el juego.',
+      'Click a player to plan against them. Orange: last fight more than 7 days ago. ± is the doubt in the estimate.': 'Pulsa un jugador para planificar contra él. Naranja: última pelea hace más de 7 días. ± es la duda de la estimación.',
+      'No build yet: load yours on the Import tab (script, button or API key).': 'Aún sin build: carga el tuyo en la pestaña Importar (script, botón o clave API).',
       '{0} with the full log': '{0} con el registro completo',
       'Arena list: {0} results from everyone.': 'Lista de arena: {0} resultados de todos.',
       '{0} new Arena list results.': '{0} resultados nuevos de la lista de arena.',
@@ -497,6 +557,66 @@
       'Against the members of {0}, one at a time; win rate good to about ±{1} points.': '对阵 {0} 的成员，逐一对战；胜率误差约 ±{1} 个百分点。',
       'for Stellar Odyssey · fan-made': 'Stellar Odyssey · 玩家制作',
       'theme': '主题',
+      'Move members between groups here, then click Check my groups above. Nothing changes in the game.': '在这里调整各编组的成员，然后点击上方的检查我的编组。游戏中不会有任何改动。',
+      'Change my groups': '调整我的编组',
+      'Your groups, as tested': '你的编组（测试时）',
+      'Arena': '竞技场',
+      'Battlefield': '战场',
+      'Import': '导入',
+      'Simulated against {0} fights; the win chance is good to about ±{1} points.': '针对 {0} 场战斗进行模拟；胜率的误差约为 ±{1} 点。',
+      'With the best build': '使用最佳配置',
+      'After the upgrades you can afford': '买下负担得起的升级后',
+      '{0} points, {1} upgrades': '{0} 点，{1} 项升级',
+      'nothing affordable now': '目前没有负担得起的',
+      'Every opponent here always beats you or always loses to you: no change of build would alter a result.': '这里的每个对手要么总是赢你，要么总是输给你：改变配置不会改变任何结果。',
+      'Keep your build: the best change found is worth {0} points, inside the noise (±{1}).': '保持你的配置：找到的最佳改动只值 {0} 点，在误差范围内（±{1}）。',
+      'Green: what to change. Free changes only (points, gear stats, skills).': '绿色：需要改动的地方。只包含免费的改动（点数、装备属性、技能）。',
+      'Buy now': '现在购买',
+      'Next upgrade': '下一项升级',
+      'Details': '详情',
+      'Gain: points of win chance. Each fight is simulated half attacking, half defending.': '收益：胜率的点数。每场战斗一半按进攻、一半按防守进行模拟。',
+      'no squadron known': '舰队未知',
+      'The average player at my strength': '与我实力相当的普通玩家',
+      'A whole squadron': '整支舰队',
+      'Pick a player.': '请选择一位玩家。',
+      'Pick a squadron.': '请选择一支舰队。',
+      '{0}: precision {1}, evasion {2}, skills {3}; from {4} squadron battles and {5} duels.': '{0}：精准 {1}，闪避 {2}，技能 {3}；来自 {4} 场舰队战斗和 {5} 场决斗。',
+      'Every member of {0} seen in battles, one at a time, as arena duels.': '{0} 中在战斗里出现过的每位成员，逐个按竞技场决斗计算。',
+      'Made-up rivals with your total stats, on the split that wins most.': '虚构的对手，总属性与你相同，采用胜率最高的分配。',
+      'Win against': '要战胜',
+      'Only {0} arena fights known, under the {1} needed: the plan uses the average player until then.': '只知道 {0} 场竞技场战斗，少于所需的 {1} 场：在此之前按普通玩家规划。',
+      'Their estimated build': '对方的估计配置',
+      'Nothing imported yet: see the steps below.': '尚未导入任何内容：请看下面的步骤。',
+      'No roster yet: open Squadron Groups once in the game.': '还没有名单：请在游戏中打开一次舰队编组。',
+      'Share my imports with everyone (never my API key or materials)': '与所有人分享我的导入（绝不包含我的 API 密钥或材料）',
+      'No fights yet: bring them in on the Import tab.': '还没有战斗：请在“导入”标签页中导入。',
+      'No roster yet: open Squadron Groups once in the game, then send to the planner again.': '还没有名单：请在游戏中打开一次舰队编组，然后再次发送到规划器。',
+      'Win against (tick up to 3 enemy groups)': '要战胜（最多勾选 3 个敌方编组）',
+      'The suggested groups: +{0} points of average win chance over the current ones.': '建议的编组：平均胜率比当前编组高 {0} 点。',
+      'Your current groups are already as good as anything found.': '你当前的编组已经和找到的最佳方案一样好。',
+      'In brackets: attacking / defending. ± is the doubt left by luck and by the estimates of the enemy.': '括号内：进攻 / 防守。± 是运气和对敌方估计带来的不确定性。',
+      'Copy for chat': '复制到聊天',
+      'Edit these groups myself': '自己调整这些编组',
+      'Who plays ({0} of {1})': '谁上场（{1} 人中的 {0} 人）',
+      'Your roster as the game sent it {0}. Untick whoever will not be there.': '游戏发送的名单（{0}）。取消勾选不会到场的人。',
+      'Build my own groups': '自己组建编组',
+      'Compare with the groups as they are now': '与当前编组比较',
+      'now': '当前',
+      'inactive': '不活跃',
+      'free': '空闲',
+      'All players': '所有玩家',
+      'More': '更多',
+      'How to bring your fights in': '如何导入你的战斗',
+      '<b>Script (best):</b> install <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">Tampermonkey</a>, then <a href="{0}" target="_blank" rel="noopener">PvP Meta</a>. In the game open Battlefield › Battle Log › Squadron (50 per page, every page), Battle Log › Arena and Squadron Groups. Then click <b>⚔ PvP Meta › Open in planner ↗</b>.': '<b>脚本（推荐）：</b>安装 <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">Tampermonkey</a>，再安装 <a href="{0}" target="_blank" rel="noopener">PvP Meta</a>。在游戏中打开 战场 › 战斗日志 › 舰队（每页 50 条，每一页都看）、战斗日志 › 竞技场 和 舰队编组。然后点击 <b>⚔ PvP Meta › Open in planner ↗</b>。',
+      '<b>No install:</b> drag this button to your bookmarks bar (Ctrl+Shift+B shows it):': '<b>无需安装：</b>把这个按钮拖到书签栏（Ctrl+Shift+B 显示书签栏）：',
+      'Click it on the game page, open the same three pages, then click <b>Send to planner</b>. Web browsers only, not the Steam app.': '在游戏页面点击它，打开同样的三个页面，然后点击<b>发送到规划器</b>。仅限网页浏览器，不支持 Steam 应用。',
+      '(for the F12 console, if bookmarks are not possible)': '（无法使用书签时，粘贴到 F12 控制台）',
+      '<b>Build only:</b> paste your API key below.': '<b>只要配置：</b>在下方粘贴你的 API 密钥。',
+      'Read-only: nothing here acts in the game. View battle on an arena duel is only needed for a player never seen in a squadron battle.': '只读：这里的任何内容都不会在游戏中执行操作。只有从未在舰队战斗中见过的玩家，才需要在竞技场决斗上点击查看战斗。',
+      'The key goes only to the game\'s own API, from this browser. One load uses 1 of your 50 daily calls; a reload within 30 minutes is free.': '密钥只会从此浏览器发送到游戏自己的 API。每次加载消耗每日 50 次调用中的 1 次；30 分钟内重新加载不计次数。',
+      'Unofficial fan tool. Read-only: it cannot change anything in the game.': '非官方的玩家自制工具。只读：无法更改游戏中的任何内容。',
+      'Click a player to plan against them. Orange: last fight more than 7 days ago. ± is the doubt in the estimate.': '点击一位玩家即可针对其规划。橙色：最近一次战斗在 7 天以前。± 是估计的不确定性。',
+      'No build yet: load yours on the Import tab (script, button or API key).': '还没有配置：请在“导入”标签页加载（脚本、按钮或 API 密钥）。',
       '{0} with the full log': '{0} 场有完整日志',
       'Arena list: {0} results from everyone.': '竞技场列表：来自所有人的 {0} 条结果。',
       '{0} new Arena list results.': '{0} 条新的竞技场列表结果。',
@@ -1036,12 +1156,8 @@
     };
   }
 
-  /* ---- the planner tabs, as on the page but without duels ---- */
-  function subTabs() {
-    return '<div class="seg">' + [['cur', 'Current'], ['best', 'Best build'], ['up', 'Upgrades']].map(function (x) {
-      return '<button data-sub="' + x[0] + '"' + (bsub === x[0] ? ' class="on"' : '') + '>' + x[1] + '</button>';
-    }).join('') + '</div>';
-  }
+  /* ---- the Arena result: one view (1.8.0) ---- */
+  function subTabs() { return ''; }
 
   // 419.60K, 22.35M: the way Squadron Groups writes damage and HP.
   function kmTxt(x) {
@@ -1050,28 +1166,44 @@
     return String(Math.round(x));
   }
 
+  // How sure the win chance is, in one line.
   function confLine(plan) {
-    if (!plan) return '';
-    var k = vsKind();
-    if (plan.synthetic) {
-      if (k === 'player' || k === 'squad') return line('Nothing to plan against yet: pick a ' + (k === 'player' ? 'player' : 'squadron') + ' above. Until then this is against typical players at your strength.', 'warn');
-      return line('Scored against typical players at your strength (made-up rivals with your total stats).' + (IMP ? '' : ' To plan against real opponents, bring in your fights on the Import fights tab.'), 'mu');
-    }
-    if (k === 'player') return vsLine();
-    if (k === 'squad') return line(t('Against the members of {0}, one at a time; win rate good to about ±{1} points.', [VS.sq, seTxt(plan.cur.se)]), 'mu');
-    var se = plan.cur ? plan.cur.se : 50;
-    return line(plan.pool + ' duels on record, win rate good to about ±' + seTxt(se) + ' points.', se > 12 ? 'warn' : 'mu');
+    if (!plan || plan.synthetic || !plan.cur) return '';
+    return line(t('Simulated against {0} fights; the win chance is good to about ±{1} points.', [plan.pool, seTxt(plan.cur.se)]), plan.cur.se > 12 ? 'warn' : 'mu');
   }
 
-  function renderCur(pv, plan) {
-    var t0 = pvTotals(pv), h = '';
-    h += '<div class="tiles">' + tile('Damage', kmTxt(t0.damage), t('Power × clones, as in Squadron Groups')) + tile('HP', kmTxt(t0.hp * pv.N), t('all clones together, as in Squadron Groups')) +
-      tile(t('Your chance to win'), plan ? pvPct(plan.cur.score) + '%' : '--', plan ? vsWho(plan) : 'working') + '</div>';
-    h += sect('Stat points') + buildTables(pv, t0);
-    if (plan) h += hitLines(t0, plan.ref);
-    else h += line('Working out the numbers...');
-    h += line('The win rate is how often this build wins a simulated duel against ' + (plan && !plan.synthetic ? 'the opponents chosen above' : 'typical players at your strength') + ', half attacking and half defending.');
-    if (plan) h += confLine(plan);
+  // Chance now, the best build, the upgrades: everything the tab is for.
+  function renderBattle() {
+    var pv = S.storeOk ? readPvp(S.storeState) : null;
+    if (!pv) return '';
+    var plan = pvRequest(pv), t0 = pvTotals(pv), pm = String.fromCharCode(177), h = '';
+    if (!plan) {
+      return '<div class="tiles">' + tile(t('Your chance to win'), '--', t('working')) + '</div>' +
+        line(S.lastErr && pvFailed ? S.lastErr : t('Working out the numbers...'));
+    }
+    var fr = plan.stop ? null : plan.free, bar = fr ? Math.max(2 * fr.se, S.inputs.bestGap || 0) : 0, worth = !!fr && fr.gain > bar;
+    var buy = !plan.stop && plan.buy && plan.buy.steps.length ? plan.buy : null;
+    h += '<div class="tiles">' + tile(t('Your chance to win'), pvPct(plan.cur.score) + '%', vsWho(plan)) +
+      tile(t('With the best build'), fr ? pvPct(fr.score) + '%' : '--', fr ? pts1(fr.gain) + ' ' + pm + seTxt(fr.se) : '', worth ? 'good' : '') +
+      tile(t('After the upgrades you can afford'), buy ? pvPct(buy.score) + '%' : '--', buy ? t('{0} points, {1} upgrades', [pts1(buy.gain), buy.steps.length]) : t('nothing affordable now'), buy ? 'good' : '') + '</div>';
+
+    h += sect(t('Best build'));
+    if (plan.stop) h += line(t('Every opponent here always beats you or always loses to you: no change of build would alter a result.'), 'warn') + buildTables(pv, t0);
+    else if (!worth) h += line(t('Keep your build: the best change found is worth {0} points, inside the noise (±{1}).', [pts1(fr.gain), seTxt(fr.se)]), 'good') + buildTables(pv, t0);
+    else h += buildTables(fr.build, fr.totals, pv, t0) + line(t('Green: what to change. Free changes only (points, gear stats, skills).'), 'mu');
+
+    var rows = plan.next || [];
+    if (!rows.length && typeof pvUpgradeRows === 'function') pv.gear.forEach(function (g, i) { rows = rows.concat(pvUpgradeRows(pv, null, 0, i)); });
+    rows = rows.slice().sort(function (a, b) { return (b.gain === null ? 0 : b.gain) - (a.gain === null ? 0 : a.gain); }).slice(0, 5);
+    h += sect(t('Upgrades'));
+    if (buy) h += tbl([t('Buy now'), t('Upgrade'), t('Cost')], buy.steps.map(function (x) { return [cap(x.name), cap(x.kind) + ' ' + x.from + ' \u2192 ' + x.to, grp(x.cost) + ' ' + x.res]; }));
+    if (rows.length) h += tbl([t('Next upgrade'), t('Cost'), t('You have'), t('Gain')], rows.map(function (r) {
+      return [cap(r.name) + ' ' + r.kind + ' ' + (r.from + 1), grp(r.cost) + ' ' + r.res, { t: grp(r.have), c: r.have >= r.cost ? 'good' : '' }, r.gain === null ? null : pts1(r.gain)];
+    }));
+    h += '<details class="more"><summary>' + esc(t('Details')) + '</summary>' +
+      kvs([['Damage', kmTxt(t0.damage)], ['HP', kmTxt(t0.hp * pv.N)], ['Clones', String(pv.N)], ['Gear pieces', String(pv.gear.length)], ['Stat points', grp(pv.pool)], ['PvP badges', grp(pv.badges)], ['Crafting level', String(pv.craft)], ['Velari bonus', '+' + grp(pv.vel)]]) +
+      hitLines(t0, plan.ref, worth ? fr.totals : null) + confLine(plan) +
+      line(t('Gain: points of win chance. Each fight is simulated half attacking, half defending.'), 'mu') + '</details>';
     return h;
   }
 
@@ -2364,12 +2496,12 @@
     if (typeof dataPill === 'function') dataPill();
     var el = root.querySelector('#impstat');
     if (!el) return;
-    if (!IMP) { el.innerHTML = line(t('Nothing imported yet. See How to use at the top: the PvP Meta script, the PvP Planner button or a share file brings your battles in.'), 'mu'); return; }
+    if (!IMP) { el.innerHTML = line(t('Nothing imported yet: see the steps below.'), 'mu'); return; }
     var x = IMP.x, sq = {};
     x.players.forEach(function (p) { if (p.sq) sq[p.sq] = 1; });
     el.innerHTML = '<div class="tiles">' + tile(t('Players'), String(x.players.length), t('{0} squadrons', [Object.keys(sq).length])) + tile(t('Squadron battles'), String(x.battles ? x.battles.length : 0), x.own ? t('yours: {0}', [x.own]) : '') +
       tile(t('Arena duels'), String(vsArena().all), t('{0} with the full log', [IMP.duels.length])) + '</div>' +
-      line((IMP.src === 'share' ? t('Imported {0} from a share file by {1}.', [ago(IMP.made), x.me || t('a squadmate')]) : IMP.src === 'file' ? t('Imported {0} from the archive file.', [ago(IMP.made)]) : IMP.src === 'button' ? t('Imported {0} with the PvP Planner button.', [ago(IMP.made)]) : IMP.src === 'saved' ? t('Imported {0} from what is saved in this browser.', [ago(IMP.made)]) : IMP.src === 'squad' || IMP.src === 'shared' ? t('Includes everyone\'s shared battles.') : t('Imported {0} from PvP Meta.', [ago(IMP.made)])) + ' ' + (archCount().b || archCount().d ? t('Saved in this browser: {0} squadron battles, {1} duels; every new load adds to it.', [archCount().b, archCount().d]) + (archCount().l ? ' ' + t('Arena list: {0} results from everyone.', [archCount().l]) : '') : t('Kept in this browser only.')) + (x.roster ? '' : ' ' + t('No Squadron Groups roster in it yet: open Squadron Groups once in the game so your own members\' precision and evasion are known, which sharpens every estimate.')), x.roster ? 'mu' : 'warn') +
+      line(t('Saved in this browser: {0} squadron battles, {1} duels; every new load adds to it.', [archCount().b, archCount().d]) + (x.roster ? '' : ' ' + t('No roster yet: open Squadron Groups once in the game.')), x.roster ? 'mu' : 'warn') +
       (warn ? line(warn, 'warn') : '');
   }
 
@@ -2455,14 +2587,33 @@
     });
     return o;
   }
-  // The drop-down of every player, by squadron then by name.
-  function plSelect(id, cur) {
-    var by = {}, names = [];
+  // Every player as drop-down options, by squadron then by name.
+  function plOptions(cur, pre) {
+    var by = {}, names = [], low = function (x) { return String(x).toLowerCase(); };
     (IMP ? IMP.x.players : []).forEach(function (p) { var k = p.sq || ''; if (!by[k]) { by[k] = []; names.push(k); } by[k].push(p.name); });
-    names.sort(function (x, y) { return !x ? 1 : (!y ? -1 : x.toLowerCase() < y.toLowerCase() ? -1 : 1); });
-    return '<select id="' + id + '" style="max-width:240px"><option value="">' + esc(t('Jump to a player…')) + '</option>' + names.map(function (k) {
-      return '<optgroup label="' + esc(k || t('arena')) + '">' + by[k].sort(function (x, y) { return x.toLowerCase() < y.toLowerCase() ? -1 : 1; }).map(function (n) { return '<option value="' + esc(n) + '"' + (n === cur ? ' selected' : '') + '>' + esc(n) + '</option>'; }).join('') + '</optgroup>';
-    }).join('') + '</select>';
+    names.sort(function (x, y) { return !x ? 1 : (!y ? -1 : low(x) < low(y) ? -1 : 1); });
+    return names.map(function (k) {
+      return '<optgroup label="' + esc(k || t('no squadron known')) + '">' + by[k].sort(function (x, y) { return low(x) < low(y) ? -1 : 1; }).map(function (nm) { return '<option value="' + esc(pre + nm) + '"' + (pre + nm === cur ? ' selected' : '') + '>' + esc(nm) + '</option>'; }).join('') + '</optgroup>';
+    }).join('');
+  }
+  // The one picker of the Arena tab: who the build should win against.
+  function vsSelect() {
+    var k = vsKind(), cur = k === 'player' ? 'pl:' + VS.pl : (k === 'squad' ? 'sq:' + VS.sq : k);
+    var opt = function (v, txt) { return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(txt) + '</option>'; };
+    var h = '<select id="f_vs">' + opt('meta', t('The average player at my strength'));
+    if (IMP) {
+      h += opt('duels', t('My arena opponents ({0})', [vsArenaN()]));
+      var sq = vsSquads().sort(function (x, y) { return x.name.toLowerCase() < y.name.toLowerCase() ? -1 : 1; });
+      if (sq.length) h += '<optgroup label="' + esc(t('A whole squadron')) + '">' + sq.map(function (q) { return opt('sq:' + q.name, q.name + ' (' + q.n + ')'); }).join('') + '</optgroup>';
+      h += plOptions(cur, 'pl:');
+    }
+    return h + '</select>';
+  }
+  function vsPick(v) {
+    if (v === 'meta' || v === 'duels') VS.kind = v;
+    else if (v.indexOf('pl:') === 0) { VS.kind = 'player'; VS.pl = v.slice(3); }
+    else if (v.indexOf('sq:') === 0) { VS.kind = 'squad'; VS.sq = v.slice(3); }
+    store.set('vs', VS); renderVs(); render();
   }
 
   // The records the plan fights. A single player is fought as 8 copies so
@@ -2536,7 +2687,6 @@
     if (p.chg) h += line(t('Hidden build change found around {0}: their hit rate, dodge rate or skills jumped while damage, health and clones stayed the same. Only fights after it are used.', [whenTxt(p.chg)]), 'warn');
     if (p.ours) h += line(t('Several players seemed to change build at the same time around {0}: that is our side (your squadmates got stronger), so it is not counted as a change of theirs. Open Squadron Groups in the game so the page has your members\' latest stats.', [whenTxt(p.ours)]), 'warn');
     if (p.mixed) h += line(t('Their damage, health or clones changed since older fights: precision and evasion also use fights from before the change, because the new build has too few yet.'), 'warn');
-    h += line(t('Precision and evasion are worked out from how often they hit our members and how often our members missed them, against our members\' exact stats: the best fit to every shot in the logs. More fights make the ± smaller.'), 'mu');
     return h;
   }
   function estTxt(f) {
@@ -2566,9 +2716,8 @@
     var k = vsKind();
     if (k === 'player') {
       var c = vsCard(VS.pl);
-      if (!c) return line('Pick a player below.', 'warn');
-      return line(t('Against {0}, as an arena duel, half attacking and half defending. Damage, health, clones, crit and dual shot are exact; precision {1}, evasion {2} and skills ({3}) are estimated from {4} squadron battles and {5} duels, and the plan carries that doubt.',
-        [c.name + (c.sq ? ' (' + c.sq + ')' : ''), estTxt(c.P).t, estTxt(c.E).t, skTxt(c.sk), c.nb, c.nd]) + (c.mixed ? ' ' + t('Their build changed between battles; older battles were pooled in.') : ''), c.P && c.E ? 'mu' : 'warn');
+      if (!c) return line(t('Pick a player.'), 'warn');
+      return line(t('{0}: precision {1}, evasion {2}, skills {3}; from {4} squadron battles and {5} duels.', [c.name + (c.sq ? ' (' + c.sq + ')' : ''), estTxt(c.P).t, estTxt(c.E).t, skTxt(c.sk), c.nb || 0, c.nd || 0]), c.P && c.E ? 'mu' : 'warn');
     }
     if (k === 'duels' && IMP) {
       var A = vsArena();
@@ -2576,57 +2725,28 @@
       return line(t('{0} arena fights: {1} read from a full fight log, {2} from your Arena list with the build each opponent showed in squadron battles.', [A.recs.length + A.rows.length, A.recs.length, A.rows.length]) +
         (A.nunk ? ' ' + t('{0} more fights are against players never seen in a squadron battle ({1}): click View battle on one of their fights to add them.', [A.nunk, A.unk.slice(0, 6).join(', ') + (A.unk.length > 6 ? '…' : '')]) : ''), 'mu');
     }
-    if (k === 'squad') return VS.sq ? line(t('Against every member of {0} seen in your battles, one at a time as arena duels. For squadron battles as they really run (a relay with kill debuffs), see Squadron groups.', [VS.sq]), 'mu') : line('Pick a squadron below.', 'warn');
-    return '';
+    if (k === 'squad') return VS.sq ? line(t('Every member of {0} seen in battles, one at a time, as arena duels.', [VS.sq]), 'mu') : line(t('Pick a squadron.'), 'warn');
+    return line(t('Made-up rivals with your total stats, on the split that wins most.'), 'mu');
   }
 
-  function vsSeg() {
-    var nd = IMP ? vsArenaN() : 0, k = vsKind();
-    return '<div class="seg">' + [['meta', t('Typical players at my strength')], ['duels', t('My arena opponents ({0})', [nd])], ['player', t('One player…')], ['squad', t('A squadron…')]].map(function (x) {
-      return '<button data-vs="' + x[0] + '"' + (k === x[0] ? ' class="on"' : '') + '>' + esc(x[1]) + '</button>';
-    }).join('') + '</div>';
-  }
-
+  var VS_OPEN = false;
   function renderVs() {
     var el = root.querySelector('#vsbody');
     if (!el) return;
     impStatus();
     renderSq();
     if (typeof renderPlayers === 'function') renderPlayers();
-    var k = vsKind(), h = vsSeg();
-    if (!IMP && (k === 'player' || k === 'squad' || k === 'duels')) h += line('No fights yet: bring them in on the Import fights tab.', 'warn');
-    else if (k === 'duels' && vsArenaN() < PV_FLOOR) h += line('Only ' + vsArenaN() + ' duels on record, under the ' + PV_FLOOR + ' needed: the plan uses typical players at your strength until then.', 'warn');
-    else if (k === 'player') {
-      var q = (VS.q || '').toLowerCase(), list = IMP.x.players.filter(function (p) { return !q || p.name.toLowerCase().indexOf(q) >= 0 || String(p.sq || '').toLowerCase().indexOf(q) >= 0; });
-      h += '<div class="grid"><label>Find a player or squadron<input type="search" id="f_vsq" value="' + esc(VS.q || '') + '" placeholder="name"></label><label>' + esc(t('All players ({0})', [IMP.x.players.length])) + plSelect('f_vspl', VS.pl) + '</label></div>';
-      h += '<div class="card wide scrolly" style="max-height:45vh"><table class="t pick"><thead><tr><th>Player</th><th>Squadron</th><th>Seen</th><th>Build since</th><th>Damage</th><th>Health</th><th>Clones</th><th>Precision</th><th>Evasion</th><th>Skills</th></tr></thead><tbody>' +
-        list.map(function (p) {
-          var e1 = estTxt(p.P), e2 = estTxt(p.E);
-          return '<tr data-pick="' + esc(p.name) + '"' + (p.name === VS.pl ? ' class="hl"' : '') + '><td><b>' + esc(p.name) + '</b></td><td>' + esc(p.sq || 'arena') + '</td><td' + (vsOld(p.t) ? ' class="warn"' : '') + '>' + esc(whenTxt(p.t)) + '</td><td>' + esc(p.bt ? whenTxt(p.bt) : '?') + '</td><td>' + esc(grp(p.d)) + '</td><td>' + esc(grp(p.h)) +
-            '</td><td>' + esc(String(p.n)) + '</td><td class="' + e1.c + '">' + esc(e1.t) + '</td><td class="' + e2.c + '">' + esc(e2.t) + '</td><td>' + esc(skTxt(p.sk)) + (p.sk && p.skc < 0.6 ? ' ?' : '') + '</td></tr>';
-        }).join('') + '</tbody></table></div>';
-      if (!list.length) h += line('No player matches.', 'mu');
-      h += line('Damage and health are per clone hit and per clone, exactly as the game sent them. ± is the doubt in the estimate (one standard error); "?" after the skills means they are a best guess.', 'mu');
-      h += line(t('Click a player to see the build the estimate gives them. Seen is the last fight in game time, orange when more than 7 days ago; Build since is the first fight with their current damage, health and clones.'), 'mu');
-      var picked = vsCard(VS.pl);
-      if (picked) h += vsBuildCard(picked);
-    } else if (k === 'squad') {
-      h += '<div class="card wide"><table class="t pick"><thead><tr><th>Squadron</th><th>Members seen</th><th>Last seen</th></tr></thead><tbody>' + vsSquads().map(function (q) {
-        return '<tr data-sq="' + esc(q.name) + '"' + (q.name === VS.sq ? ' class="hl"' : '') + '><td><b>' + esc(q.name) + '</b>' + (q.own ? ' (yours)' : '') + '</td><td>' + q.n + '</td><td>' + esc(whenTxt(q.t)) + '</td></tr>';
-      }).join('') + '</tbody></table></div>';
-    }
+    var k = vsKind(), all = typeof ALLTABS !== 'undefined' && ALLTABS;
+    var h = '<div class="vsrow"><b>' + esc(t('Win against')) + '</b>' + vsSelect() + '</div>';
+    if (k === 'duels' && vsArenaN() < PV_FLOOR) h += line(t('Only {0} arena fights known, under the {1} needed: the plan uses the average player until then.', [vsArenaN(), PV_FLOOR]), 'warn');
     h += vsLine();
+    var c = k === 'player' ? vsCard(VS.pl) : null;
+    if (c) h += '<details class="more" id="vsdet"' + (VS_OPEN || all ? ' open' : '') + '><summary>' + esc(t('Their estimated build')) + '</summary>' + vsBuildCard(c) + '</details>';
     el.innerHTML = h;
-    el.querySelectorAll('button[data-vs]').forEach(function (b) { b.addEventListener('click', function () { VS.kind = b.getAttribute('data-vs'); store.set('vs', VS); renderVs(); render(); }); });
-    el.querySelectorAll('tr[data-pick]').forEach(function (r) { r.addEventListener('click', function () { VS.pl = r.getAttribute('data-pick'); store.set('vs', VS); renderVs(); render(); }); });
-    el.querySelectorAll('tr[data-sq]').forEach(function (r) { r.addEventListener('click', function () { VS.sq = r.getAttribute('data-sq'); store.set('vs', VS); renderVs(); render(); }); });
-    var ps = el.querySelector('#f_vspl');
-    if (ps) ps.addEventListener('change', function () { if (!ps.value) return; VS.pl = ps.value; VS.q = ''; store.set('vs', VS); renderVs(); render(); plShow(root.querySelector('#vsbody')); });
-    var qi = el.querySelector('#f_vsq');
-    if (qi) qi.addEventListener('input', function () {
-      VS.q = qi.value; var pos = qi.selectionStart; renderVs();
-      var n = root.querySelector('#f_vsq'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} }
-    });
+    var sel = el.querySelector('#f_vs');
+    sel.addEventListener('change', function () { vsPick(sel.value); plShow(root.querySelector('#plbody')); });
+    var det = el.querySelector('#vsdet');
+    if (det) det.addEventListener('toggle', function () { VS_OPEN = det.open; });
   }
 
   /* ============================================================
@@ -2854,14 +2974,13 @@
 
   function clHtml() {
     var h = '';
-    if (CL.stats) h += '<div class="line" id="clcount"><b>' + esc(t('In the cloud: {0} battlefield logs · {1} arena logs · {2} arena results · {3} rosters', [grp(CL.stats.b || 0), grp(CL.stats.d || 0), grp(CL.stats.l || 0), grp(CL.stats.r || 0)])) + '</b>' + (CL.stats.last ? ' <span class="mu">' + esc(t('last added {0}', [ago(CL.stats.last)])) + '</span>' : '') + '</div>' +
-      line(t('Battlefield log: a squadron battle with every shot. Arena log: an arena duel opened with View battle. Arena result: one row of the Arena list (who won, both Elo).'), 'mu');
+    if (CL.stats) h += '<div class="line" id="clcount"><b>' + esc(t('In the cloud: {0} battlefield logs · {1} arena logs · {2} arena results · {3} rosters', [grp(CL.stats.b || 0), grp(CL.stats.d || 0), grp(CL.stats.l || 0), grp(CL.stats.r || 0)])) + '</b>' + (CL.stats.last ? ' <span class="mu">' + esc(t('last added {0}', [ago(CL.stats.last)])) + '</span>' : '') + '</div>';
     h += '<div class="line ' + (CL.state === 'err' ? 'bad' : 'mu') + '" id="clstat">';
     if (CL.state === 'sync') h += esc(t('Getting everyone\'s battles from the shared store...'));
     else if (CL.state === 'err') h += esc(CL.msg);
     else if (CL.state === 'ok') h += esc(t('Shared store: {0} new squadron battles and {1} new duels from others this visit; {2} battles and {3} duels sent from this browser. Everyone who opens the page gets them.', [CL.got.b, CL.got.d, CL.sent.b, CL.sent.d])) + (CL.got.l || CL.sent.l ? ' ' + esc(t('Arena list: {0} new results from others, {1} sent.', [CL.got.l, CL.sent.l])) : '');
     else h += esc(t('Shared store: connecting...'));
-    h += '</div><label class="c" style="margin-top:4px"><input type="checkbox" id="f_clshare"' + (clOn() ? ' checked' : '') + '>' + esc(t('Share my imports with everyone (battles, rosters and my arena duels; never my API key or materials)')) + '</label>';
+    h += '</div><label class="c" style="margin-top:4px"><input type="checkbox" id="f_clshare"' + (clOn() ? ' checked' : '') + '>' + esc(t('Share my imports with everyone (never my API key or materials)')) + '</label>';
     return h;
   }
   function clWire(el) {
@@ -2882,6 +3001,7 @@
   var SQG = Object.assign({ off: {}, foes: null, set: null }, store.get('sqg', {}));
   var SQ_RES = null, SQ_BUSY = false, SQ_MSG = '', SQ_W = null;
   var SQ_MY = null, SQ_MYBUSY = false, SQ_MYMSG = '';
+  var SQ_OPEN = { ros: false, own: false, now: false };
 
   function sqgSave() { store.set('sqg', { off: SQG.off, foes: SQG.foes, set: SQG.set }); }
 
@@ -2947,9 +3067,7 @@
     return '<div class="sqm"><div class="sqmh"><b>' + esc(m.user) + '</b>' + (sqgPlays(m) ? '' : ' <span class="mu">(' + esc(t('not ticked to play')) + ')</span>') +
       '<button class="sqdel" data-del="' + esc(m.user) + '" title="' + esc(t('Remove from the group')) + '">✕</button></div>' +
       '<div class="sqmb"><label class="mu">' + esc(t('Position:')) + ' <select data-pos="' + esc(m.user) + '">' + o + '</select></label><div>' +
-      '<div class="chips">' + sqgChip('Power', grp(Math.round(m.tot.power))) + sqgChip('Prec', grp(Math.round(m.tot.precision))) + sqgChip('Eva', grp(Math.round(m.tot.evasion))) + sqgChip('Hull', grp(Math.round(m.tot.hull))) + '</div>' +
-      '<div class="chips">' + sqgChip('Damage', sqgK(m.d)) + sqgChip('HP', sqgK(m.h * m.N)) + sqgChip('Clones', String(m.N)) + (m.vel ? sqgChip('Velari Lvl', String(m.vel)) : '') + '</div>' +
-      '<div class="chips">' + m.gear.map(function (g) { return sqgChip(cap(g.name), g.L + '/' + g.T); }).join('') + '</div>' +
+      '<div class="chips">' + sqgChip('Damage', sqgK(m.d)) + sqgChip('HP', sqgK(m.h * m.N)) + sqgChip('Prec', grp(Math.round(m.tot.precision))) + sqgChip('Eva', grp(Math.round(m.tot.evasion))) + '</div>' +
       '<div class="chips">' + sqgChip('Skills', skTxt(m.sk)) + '</div>' +
       '</div></div></div>';
   }
@@ -2964,8 +3082,7 @@
         '<div class="chips">' + sqgChip('Damage', sqgK(dmg)) + sqgChip('HP', sqgK(hp)) + '</div>' +
         '<select data-add="' + (gi + 1) + '"' + (g.length >= 4 ? ' disabled' : '') + '><option value="">' + esc(t(g.length >= 4 ? 'Group full (4)' : 'Select member')) + '</option>' +
         others.map(function (m) { return '<option value="' + esc(m.user) + '">' + esc(m.user) + (placed[m.user] ? ' (' + esc(t('in another group')) + ')' : '') + '</option>'; }).join('') + '</select>' +
-        '<div class="mu" style="font-size:11px;margin:3px 0 10px">' + esc(t('Add member from the list to this group')) + '</div>' +
-        '<div class="mu" style="margin-bottom:6px">' + esc(t('Members list')) + '</div>' +
+        '<div style="height:8px"></div>' +
         (g.length ? g.map(function (m, k) { return sqgCard(m, k + 1, g.length); }).join('') : '<div class="mu">' + esc(t('(empty)')) + '</div>') + '</div>';
     });
     var bench = ros.filter(function (m) { return !placed[m.user]; }).map(function (m) { return m.user; });
@@ -3054,72 +3171,77 @@
     var el = root.querySelector('#sqbody');
     if (!el) return;
     var ros = sqgRoster(), h = '';
-    if (!IMP) { el.innerHTML = line('No fights yet: bring them in on the Import fights tab.', 'mu'); return; }
-    if (!ros.length) { el.innerHTML = line('No roster yet. In the game, open Squadron Groups once (PvP Meta keeps it), then click Open in planner again.', 'warn'); return; }
-    // Our roster, exactly as the game sent it
-    h += '<div class="card wide"><table class="t pick"><thead><tr><th>Plays</th><th>Member</th><th>Now</th><th>Damage</th><th>Health</th><th>Clones</th><th>Precision</th><th>Evasion</th><th>Skills</th><th>Gear (level/tier)</th></tr></thead><tbody>' +
-      ros.slice().sort(function (a, b) { return (a.g || 9) - (b.g || 9) || a.pos - b.pos; }).map(function (m) {
-        return '<tr><td><input type="checkbox" data-play="' + esc(m.user) + '"' + (sqgPlays(m) ? ' checked' : '') + '></td><td><b>' + esc(m.user) + '</b>' + (m.active ? '' : ' <span class="mu">(inactive)</span>') + '</td><td>' + (m.g ? 'G' + m.g + ' #' + m.pos : 'free') +
-          '</td><td>' + grp(m.d) + '</td><td>' + grp(m.h) + '</td><td>' + m.N + '</td><td>' + grp(Math.round(m.tot.precision)) + '</td><td>' + grp(Math.round(m.tot.evasion)) + '</td><td>' + esc(skTxt(m.sk)) + '</td><td>' +
-          esc(m.gear.map(function (g) { return cap(g.stat).slice(0, 3) + ' ' + g.L + '/' + g.T; }).join(', ')) + '</td></tr>';
-      }).join('') + '</tbody></table></div>';
-    h += line(t('Exact, from the Squadron Groups answer {0} (damage per clone hit, health per clone). Untick whoever will not be there; it is remembered on this device.', [ago(IMP.x.roster.t)]), 'mu');
-    // Enemy groups
+    if (!IMP) { el.innerHTML = line(t('No fights yet: bring them in on the Import tab.'), 'warn'); return; }
+    if (!ros.length) { el.innerHTML = line(t('No roster yet: open Squadron Groups once in the game, then send to the planner again.'), 'warn'); return; }
+    var all = typeof ALLTABS !== 'undefined' && ALLTABS;
+    function fold(key, title, body) { return '<details class="more" data-fold="' + key + '"' + (SQ_OPEN[key] || all ? ' open' : '') + '><summary>' + esc(title) + '</summary>' + body + '</details>'; }
+    function groupsTbl(res) {
+      return tbl([t('Group'), t('Members (1 fights first)')], res.groups.map(function (G, i) {
+        var was = res.start ? res.start[i].map(function (m) { return m.id; }).join() : null, is = G.map(function (m) { return m.id; }).join();
+        return [t('Group {0}', [i + 1]), { t: G.map(function (m, k) { return (k + 1) + '. ' + m.name; }).join('   ') || t('(empty)'), c: was === null || was === is ? '' : 'good' }];
+      }).concat(res.bench.length ? [[t('Bench'), res.bench.map(function (m) { return m.name; }).join(', ')]] : []));
+    }
+    // 1. the enemy
     var foes = sqgFoeGroups(), chosen = sqgChosen().map(sqgKey);
-    h += sect('Enemy groups to plan against (up to 3)');
-    if (!foes.length) h += line('No enemy group in your battles yet.', 'warn');
-    else h += '<div class="card wide"><table class="t pick"><thead><tr><th></th><th>Group</th><th>Members, in fight order</th><th>Met</th><th>Last seen</th></tr></thead><tbody>' +
-      foes.slice(0, 30).map(function (g) {
+    h += sect(t('Win against (tick up to 3 enemy groups)'));
+    if (!foes.length) h += line(t('No enemy group in your battles yet.'), 'warn');
+    else h += '<div class="card wide scrolly" style="max-height:260px"><table class="t pick"><thead><tr><th></th><th>' + esc(t('Group')) + '</th><th>' + esc(t('Members, in fight order')) + '</th><th>' + esc(t('Met')) + '</th><th>' + esc(t('Last seen')) + '</th></tr></thead><tbody>' +
+      foes.slice(0, 60).map(function (g) {
         var k = sqgKey(g);
         return '<tr><td><input type="checkbox" data-foe="' + esc(k) + '"' + (chosen.indexOf(k) >= 0 ? ' checked' : '') + '></td><td><b>' + esc(sqgFoeName(g)) + '</b></td><td>' + esc(g.m.join(', ')) + '</td><td>' + g.n + 'x</td><td>' + esc(whenTxt(g.t)) + '</td></tr>';
       }).join('') + '</tbody></table></div>';
-    h += sect('Team builder');
-    h += line('Build your own team, like the Squadron Groups page in the game: add members to each group, set their position (1 fights first), remove with ✕. Then test it against the enemy groups ticked above. Nothing changes in the game.', 'mu');
-    h += sqgBuilder();
-    h += '<div class="btns"><button class="pri" id="b_sqmy"' + (SQ_MYBUSY ? ' disabled' : '') + '>' + (SQ_MYBUSY ? 'Working...' : 'Check my groups') + '</button>' +
-      '<button class="sec" id="b_sqreset">Reset to the groups as they are now</button>' + (SQ_RES ? '<button class="sec" id="b_sqtake">Copy the suggested groups into the team builder</button>' : '') + '</div>';
-    h += '<div class="line" id="sqmymsg">' + esc(SQ_MYMSG) + '</div>';
-    if (SQ_MY) {
-      var my = SQ_MY.res, mf = SQ_MY.foes, mhead = ['Your group'].concat(mf.map(sqgFoeName)).concat(['Average']);
-      h += tbl(['Group', 'Members (1 fights first)'], my.groups.map(function (G, i) {
-        return ['Group ' + (i + 1), G.map(function (m, k) { return (k + 1) + '. ' + m.name; }).join('   ') || '(empty)'];
-      }).concat(my.bench.length ? [['Bench', my.bench.map(function (m) { return m.name; }).join(', ')]] : []));
-      h += sect('Win chance, your team') + sqgMatrix(mhead, my.matrix, function (i) { return 'Group ' + (i + 1); });
-      h += sect('Win chance, groups as they are now') + sqgMatrix(mhead, my.now, function (i) { return 'Group ' + (i + 1) + ' now'; });
-      var sm = 0, sn = 0;
-      my.matrix.forEach(function (r) { sm += r.p; }); my.now.forEach(function (r) { sn += r.p; });
-      var d = Math.round((sm - sn) / 3 * 100);
-      h += line(d > 0 ? t('Your team: +{0} points of average win chance over the groups as they are now.', [d]) :
-        (d < 0 ? t('Your team: {0} points of average win chance under the groups as they are now.', [d]) : t('Your team: about the same as the groups as they are now.')), d > 0 ? 'good' : (d < 0 ? 'bad' : 'mu'));
-      h += '<textarea id="sqmytxt" readonly rows="' + (my.groups.length + my.matrix.length + 4) + '" style="width:100%;box-sizing:border-box;font:12px monospace;background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:8px;padding:8px">' + esc(sqgText(SQ_MY)) + '</textarea>';
-      h += '<div class="btns"><button class="sec" id="b_sqmycopy">Copy</button></div>';
-    }
-    h += sect('Best groups');
-    h += '<div class="btns"><button class="pri" id="b_sqrun"' + (SQ_BUSY ? ' disabled' : '') + '>' + (SQ_BUSY ? 'Working...' : 'Suggest groups for me') + '</button></div>';
+    // 2. the answer
+    h += '<div class="btns"><button class="pri" id="b_sqrun"' + (SQ_BUSY ? ' disabled' : '') + '>' + esc(SQ_BUSY ? t('Working...') : t('Suggest groups for me')) + '</button>' +
+      '<button class="sec" id="b_sqmy"' + (SQ_MYBUSY ? ' disabled' : '') + '>' + esc(SQ_MYBUSY ? t('Working...') : t('Check my groups')) + '</button></div>';
     h += '<div class="line" id="sqmsg">' + esc(SQ_MSG) + '</div>';
+    h += '<div class="line" id="sqmymsg">' + esc(SQ_MYMSG) + '</div>';
+    h += sqgMine();
     if (SQ_RES) {
-      var r = SQ_RES.res, f = SQ_RES.foes, head = ['Your group'].concat(f.map(sqgFoeName)).concat(['Average']);
-      h += sect('Suggested groups, in fight order');
-      h += tbl(['Group', 'Members (1 fights first)'], r.groups.map(function (G, i) {
-        var was = r.start[i].map(function (m) { return m.id; }).join(), is = G.map(function (m) { return m.id; }).join();
-        return ['Group ' + (i + 1), { t: G.map(function (m, k) { return (k + 1) + '. ' + m.name; }).join('   ') || '(empty)', c: was === is ? '' : 'good' }];
-      }).concat(r.bench.length ? [['Bench', r.bench.map(function (m) { return m.name; }).join(', ')]] : []));
-      h += sect('Win chance, suggested groups');
-      h += tbl(head, r.matrix.map(function (row, i) { return ['Group ' + (i + 1)].concat(row.cells.map(sqgCell)).concat([{ t: sqgPct(row), c: 'b' }]); }));
-      h += sect('Win chance, groups as they are now');
-      h += tbl(head, r.now.map(function (row, i) { return ['Group ' + (i + 1) + ' now'].concat(row.cells.map(sqgCell)).concat([{ t: sqgPct(row), c: 'b' }]); }));
-      var gain = Math.round(r.gain * 100 * f.length);
-      h += line(gain > 0 ? 'The suggested groups win about ' + (Math.round(r.gain * f.length * 30) / 10) + ' more of these ' + (3 * f.length) + ' pairings than the current ones (' + (gain > 0 ? '+' : '') + Math.round(r.gain * 100) + ' points of average win chance).' : 'Your current groups are already as good as anything found.', gain > 0 ? 'good' : 'mu');
-      h += line(t('In brackets: the chance when your group attacks / when it defends. They can be far apart, so look at the one that matches the fight.'), 'mu');
-      h += line('Each chance is from ' + r.matrix[0].cells[0].n + ' simulated relay fights, half attacking and half defending, with the kill debuff. ± is two standard errors of that count; the doubt in the enemies\' precision and evasion is already inside the chance, because each fight draws them within their error bars. Enemies seen in few battles carry more doubt.', 'mu');
-      h += sect('To paste in chat');
-      h += '<textarea id="sqtxt" readonly rows="' + (r.groups.length + r.matrix.length + 4) + '" style="width:100%;box-sizing:border-box;font:12px monospace;background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:8px;padding:8px">' + esc(sqgText(SQ_RES)) + '</textarea>';
-      h += '<div class="btns"><button class="sec" id="b_sqcopy">Copy</button></div>';
-      h += line('Groups are changed in the game, by hand (a group holding or attacking a zone cannot be edited until it is free).', 'mu');
+      var r = SQ_RES.res, f = SQ_RES.foes, head = [t('Your group')].concat(f.map(sqgFoeName)).concat([t('Average')]);
+      h += sect(t('Suggested groups, in fight order')) + groupsTbl(r);
+      h += sect(t('Win chance, suggested groups')) + sqgMatrix(head, r.matrix, function (i) { return t('Group {0}', [i + 1]); });
+      h += fold('now', t('Compare with the groups as they are now'), sqgMatrix(head, r.now, function (i) { return t('Group {0}', [i + 1]) + ' ' + t('now'); }));
+      var gain = Math.round(r.gain * 100);
+      h += line(gain > 0 ? t('The suggested groups: +{0} points of average win chance over the current ones.', [gain]) : t('Your current groups are already as good as anything found.'), gain > 0 ? 'good' : 'mu');
+      h += line(t('In brackets: attacking / defending. ± is the doubt left by luck and by the estimates of the enemy.'), 'mu');
+      h += '<div class="btns"><button class="sec" id="b_sqcopy">' + esc(t('Copy for chat')) + '</button><button class="sec" id="b_sqtake">' + esc(t('Edit these groups myself')) + '</button></div>';
+      h += '<textarea id="sqtxt" readonly style="position:absolute;left:-9999px;top:0;width:10px;height:10px">' + esc(sqgText(SQ_RES)) + '</textarea>';
+    }
+    // 3. who plays
+    var nplay = ros.filter(sqgPlays).length;
+    h += fold('ros', t('Who plays ({0} of {1})', [nplay, ros.length]),
+      '<div class="card wide"><table class="t pick"><thead><tr><th>' + esc(t('Plays')) + '</th><th>' + esc(t('Member')) + '</th><th>' + esc(t('Now')) + '</th><th>' + esc(t('Damage')) + '</th><th>' + esc(t('Health')) + '</th><th>' + esc(t('Precision')) + '</th><th>' + esc(t('Evasion')) + '</th><th>' + esc(t('Skills')) + '</th></tr></thead><tbody>' +
+      ros.slice().sort(function (a, b) { return (a.g || 9) - (b.g || 9) || a.pos - b.pos; }).map(function (m) {
+        return '<tr><td><input type="checkbox" data-play="' + esc(m.user) + '"' + (sqgPlays(m) ? ' checked' : '') + '></td><td><b>' + esc(m.user) + '</b>' + (m.active ? '' : ' <span class="mu">(' + esc(t('inactive')) + ')</span>') + '</td><td>' + (m.g ? 'G' + m.g + ' #' + m.pos : esc(t('free'))) +
+          '</td><td>' + grp(m.d) + '</td><td>' + grp(m.h) + '</td><td>' + grp(Math.round(m.tot.precision)) + '</td><td>' + grp(Math.round(m.tot.evasion)) + '</td><td>' + esc(skTxt(m.sk)) + '</td></tr>';
+      }).join('') + '</tbody></table></div>' +
+      line(t('Your roster as the game sent it {0}. Untick whoever will not be there.', [ago(IMP.x.roster.t)]), 'mu'));
+    // 4. my own groups
+    var own = line(t('Move members between groups here, then click Check my groups above. Nothing changes in the game.'), 'mu') + sqgBuilder() +
+      '<div class="btns"><button class="sec" id="b_sqreset">' + esc(t('Reset to the groups as they are now')) + '</button></div>';
+    h += fold('own', t('Change my groups'), own);
+    function sqgMine() {
+      var own = '';
+      if (!SQ_MY) return '';
+      {
+      var my = SQ_MY.res, mf = SQ_MY.foes, mhead = [t('Your group')].concat(mf.map(sqgFoeName)).concat([t('Average')]);
+      own += sect(t('Your groups, as tested')) + groupsTbl(my);
+      own += sect(t('Win chance, your team')) + sqgMatrix(mhead, my.matrix, function (i) { return t('Group {0}', [i + 1]); });
+      own += sect(t('Win chance, groups as they are now')) + sqgMatrix(mhead, my.now, function (i) { return t('Group {0}', [i + 1]) + ' ' + t('now'); });
+      var sm = 0, sn = 0;
+      my.matrix.forEach(function (x) { sm += x.p; }); my.now.forEach(function (x) { sn += x.p; });
+      var d = Math.round((sm - sn) / 3 * 100);
+      own += line(d > 0 ? t('Your team: +{0} points of average win chance over the groups as they are now.', [d]) :
+        (d < 0 ? t('Your team: {0} points of average win chance under the groups as they are now.', [d]) : t('Your team: about the same as the groups as they are now.')), d > 0 ? 'good' : (d < 0 ? 'bad' : 'mu'));
+      own += '<div class="btns"><button class="sec" id="b_sqmycopy">' + esc(t('Copy for chat')) + '</button></div>';
+      own += '<textarea id="sqmytxt" readonly style="position:absolute;left:-9999px;top:0;width:10px;height:10px">' + esc(sqgText(SQ_MY)) + '</textarea>';
+      }
+      return own;
     }
     el.innerHTML = h;
+    el.querySelectorAll('details[data-fold]').forEach(function (d) { d.addEventListener('toggle', function () { SQ_OPEN[d.getAttribute('data-fold')] = d.open; }); });
     el.querySelectorAll('input[data-play]').forEach(function (c) {
-      c.addEventListener('change', function () { var u = c.getAttribute('data-play'), m = ros.filter(function (x) { return x.user === u; })[0]; if (c.checked === m.active) delete SQG.off[u]; else SQG.off[u] = !c.checked; sqgSave(); });
+      c.addEventListener('change', function () { var u = c.getAttribute('data-play'), m = ros.filter(function (x) { return x.user === u; })[0]; if (c.checked === m.active) delete SQG.off[u]; else SQG.off[u] = !c.checked; sqgSave(); SQ_OPEN.ros = true; renderSq(); });
     });
     el.querySelectorAll('input[data-foe]').forEach(function (c) {
       c.addEventListener('change', function () {
@@ -3158,13 +3280,13 @@
       var set = {};
       ros.forEach(function (m) { set[m.user] = [0, 1]; });
       SQ_RES.res.groups.forEach(function (G, i) { G.forEach(function (m, k) { set[m.id] = [i + 1, k + 1]; }); });
-      SQG.set = set; SQ_MY = null; sqgSave(); renderSq();
+      SQG.set = set; SQ_MY = null; SQ_OPEN.own = true; sqgSave(); renderSq();
     });
     [['#b_sqcopy', '#sqtxt'], ['#b_sqmycopy', '#sqmytxt']].forEach(function (x) {
       var cp = el.querySelector(x[0]);
       if (cp) cp.addEventListener('click', function () {
         var ta = el.querySelector(x[1]); ta.select();
-        try { navigator.clipboard.writeText(ta.value).then(function () { cp.textContent = 'Copied'; }, function () { document.execCommand('copy'); cp.textContent = 'Copied'; }); } catch (e) { document.execCommand('copy'); cp.textContent = 'Copied'; }
+        try { navigator.clipboard.writeText(ta.value).then(function () { cp.textContent = t('Copied'); }, function () { document.execCommand('copy'); cp.textContent = t('Copied'); }); } catch (e) { document.execCommand('copy'); cp.textContent = t('Copied'); }
       });
     });
   }
@@ -3173,8 +3295,6 @@
      FROM ASTROLABE 3.22.9 (copied unchanged by the build step)
      ============================================================ */
 
-  var AR_MAX = 200;
-
   function numOr(v) {
     if (typeof v === 'number' && isFinite(v)) return v;
     if (typeof v === 'string') {
@@ -3182,16 +3302,6 @@
       if (m) return parseFloat(m[0]);
     }
     return null;
-  }
-
-  function fmt(x, dp) {
-    if (x === null || x === undefined || isNaN(x)) return '--';
-    var a = Math.abs(x);
-    if (a >= 1e12) return (x / 1e12).toFixed(2) + 'T';
-    if (a >= 1e9) return (x / 1e9).toFixed(2) + 'B';
-    if (a >= 1e6) return (x / 1e6).toFixed(2) + 'M';
-    if (a >= 1e3) return (x / 1e3).toFixed(2) + 'k';
-    return Number(x).toFixed(dp === undefined ? 1 : dp);
   }
 
   function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
@@ -3663,8 +3773,6 @@
     { f: [0.30, 0.15, 0.20, 0.35], sk: ['dot', 'dot', 'block', 'block'], w: 0.15 }
   ];
 
-  var PV_NAIVE_BEST = [0.35, 0.20, 0.10, 0.35];
-
   var PV_META_COPIES = 20;
 
   function pvMetaPool(b) {
@@ -3948,19 +4056,11 @@
 
   function pct(x, dp) { return x === null || x === undefined || isNaN(x) ? '--' : (x * 100).toFixed(dp === undefined ? 1 : dp) + '%'; }
 
-  var bsub = 'cur';
-
-  var bshow = false;
-
   var pvBusy = null;
 
   var pvFailed = null;
 
   var pvMemo = { key: null, plan: null };
-
-  var pvCheck = {};
-
-  var pvCheckBusy = false;
 
   function grp(x) { return Math.round(x).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
 
@@ -3994,212 +4094,7 @@
     return kvs([['You hit', pct(a, 0) + ' \u2192 ' + pct(a1, 0)], ['They hit', pct(b, 0) + ' \u2192 ' + pct(b1, 0)]]);
   }
 
-  function renderBattle() {
-    var pv = S.storeOk ? readPvp(S.storeState) : null;
-    if (!pv) return '<div class="empty">The battlefield data is not readable yet.</div>';
-    var h = subTabs();
-    if (bsub === 'fights') return h + renderFights();
-    var plan = pvRequest(pv);
-    if (bsub === 'best') return h + renderBest(pv, plan);
-    if (bsub === 'up') return h + renderUp(pv, plan);
-    return h + renderCur(pv, plan);
-  }
-
-  function waitLine() {
-    return S.battles.length ? line(S.lastErr && pvFailed ? S.lastErr : 'Working out the numbers...') : '';
-  }
-
-  function metaPoints(pv, frac) {
-    var base = pvGearBase(pv), pool = Math.max(0, Math.round(pv.pool)), total = pool;
-    PVP_STATS.forEach(function (s) { total += base[s]; });
-    var pts = {}, open = PVP_STATS.slice(), left = pool;
-    for (var guard = 0; guard < 5 && open.length; guard++) {
-      var share = 0; open.forEach(function (s) { share += frac[PVP_STATS.indexOf(s)]; });
-      var baseOpen = 0; open.forEach(function (s) { baseOpen += base[s]; });
-      var over = [];
-      open.forEach(function (s) {
-        var want = (left + baseOpen) * frac[PVP_STATS.indexOf(s)] / share - base[s];
-        if (want < 0) { pts[s] = 0; over.push(s); } else pts[s] = want;
-      });
-      if (!over.length) break;
-      open = open.filter(function (s) { return over.indexOf(s) < 0; });
-    }
-    // whole points that add up to the pool
-    var used = 0; PVP_STATS.forEach(function (s) { pts[s] = Math.floor(pts[s] || 0); used += pts[s]; });
-    while (used < pool) { var best = null, bd = -Infinity; PVP_STATS.forEach(function (s, i) { var d = frac[i] * total - base[s] - pts[s]; if (d > bd) { bd = d; best = s; } }); pts[best]++; used++; }
-    return pts;
-  }
-
-  function metaGear(pv, frac) {
-    var n = pv.gear.length, total = Math.pow(PVP_STATS.length, n), best = null;
-    // "Nearest" is judged by the planner's own strength formula against a
-    // meta opponent at the same total (pvTerm), not by distance in the
-    // shares: too little precision or evasion hurts more than too much, and
-    // the formula knows that (30/20/20/30 beats 40/10/10/40, as the
-    // simulation also says).
-    var budget = Math.max(0, Math.round(pv.pool)), b0 = pvGearBase(pv);
-    PVP_STATS.forEach(function (s) { budget += b0[s]; });
-    var ref = { precision: frac[1] * budget, evasion: frac[2] * budget };
-    for (var a = 0; a < total; a++) {
-      var c = pvCopy(pv), x = a, same = true;
-      for (var i = 0; i < n; i++) { c.gear[i].stat = PVP_STATS[x % PVP_STATS.length]; if (c.gear[i].stat !== pv.gear[i].stat) same = false; x = Math.floor(x / PVP_STATS.length); }
-      var pts = metaPoints(c, frac), base = pvGearBase(c), t = {}, score = 0, sum = 0, off = 0;
-      PVP_STATS.forEach(function (s) { t[s] = base[s] + pts[s]; score += pvTerm(s, t[s], ref); sum += t[s]; });
-      PVP_STATS.forEach(function (s, i) { off = Math.max(off, Math.abs((sum ? t[s] / sum : 0) - frac[i])); });
-      // An assignment that lands on the split (every share within a point)
-      // is as good as any other that does, so the pieces stay as they are
-      // when they already allow it; the formula only decides when none does.
-      var hit = off <= 0.01, cand = { gear: c.gear, pts: pts, base: base, t: t, score: score, same: same, hit: hit };
-      if (!best) { best = cand; continue; }
-      if (hit && !best.hit) best = cand;
-      else if (hit === best.hit) {
-        if (hit) { if (same) best = cand; }   // any assignment that lands is fine: keep the pieces as they are when they do
-        else if (score > best.score + 1e-9 || (same && score >= best.score - 1e-9)) best = cand;
-      }
-    }
-    return best;
-  }
-
-  function metaTable(pv, t0) {
-    var budget = t0.power + t0.precision + t0.evasion + t0.hull;
-    var meta = PV_META[0].f, naive = PV_NAIVE_BEST, gm = metaGear(pv, meta), gn = metaGear(pv, naive), pm = gm.pts, pn = gn.pts;
-    var rows = PVP_STATS.map(function (s, i) {
-      var now = t0[s], share = budget ? now / budget : 0;
-      return [cap(s), grp(pv.pts[s] || 0) + ' pts, ' + grp(now) + ' (' + Math.round(share * 100) + '%)',
-        { t: grp(pm[s]) + ' pts', c: Math.abs(pm[s] - (pv.pts[s] || 0)) > 1 ? 'good' : '' }, grp(gm.t[s]) + ' (' + Math.round(gm.t[s] / budget * 100) + '%)',
-        { t: grp(pn[s]) + ' pts', c: Math.abs(pn[s] - (pv.pts[s] || 0)) > 1 ? 'good' : '' }];
-    });
-    function gearTxt(g) { return g.map(function (x) { return cap(x.name) + ' ' + cap(x.stat); }).join(', '); }
-    rows.push(['Gear stats', gearTxt(pv.gear), { t: gm.same ? 'as now' : gearTxt(gm.gear), c: gm.same ? '' : 'good' }, '', { t: gn.same ? 'as now' : gearTxt(gn.gear), c: gn.same ? '' : 'good' }]);
-    rows.push(['Skills', pv.gear.map(function (g) { return cap(g.skill); }).join(', '), { t: 'Block x4, or DoT + Block x3', c: 'b' }, '', { t: 'Block x4', c: 'b' }]);
-    var h = sect('The meta, at your total stat') + tbl(['', 'You now', 'Meta: your points', 'Meta total', 'Even-split ladder: points'], rows);
-    h += line('"Your points" is where to put your ' + grp(pv.pool) + ' PvP stat points, with the gear stats in the row below, to land on that split; green differs from now. Which stat a piece carries is worth nothing in itself: it only matters that the points can still reach the split. The row picks the assignment that lands nearest; a stat the gear already pushes past its share gets no points.', 'mu');
-    h += line('From self-play on this simulator at equal total stat: the split no build beats on average. Attacker and defender want the same split; the defender can afford a DoT piece or two. Stun and Focus lose at equal budget. Against a young ladder of even-split players, more precision pays.', 'mu');
-    h += line('Total stat decides most duels before the split does: 15% less than your opponent is 3 wins in 100 whatever the build. Gear levels and tiers beat any re-split.', 'mu');
-    return h;
-  }
-
   function seTxt(se) { return se >= 10 ? String(Math.round(se)) : String(Math.round(se * 10) / 10); }
-
-  function renderBest(pv, plan) {
-    if (!plan) return waitLine() || line('Working out the numbers...');
-    var t0 = pvTotals(pv);
-    if (plan.stop) {
-      return '<div class="tiles">' + tile('Duels', String(plan.pool), 'on record') +
-        tile('Win rate', pvPct(plan.cur.score) + '%', '\u00b1' + seTxt(plan.cur.se)) +
-        tile('Verdict', 'Nothing to tune', plan.decided + ' already settled', 'good') + '</div>' +
-        line('Every opponent on record is one you always beat or always lose to, so no change of build would alter a single result. This will have something to say once you meet someone closer to your own strength.') +
-        confLine(plan) + metaTable(pv, t0);
-    }
-    var f = plan.free, h = '';
-    // The gain has to beat its own error bar, not a number I picked.
-    var bar = Math.max(2 * f.se, S.inputs.bestGap || 0), worth = f.gain > bar;
-    var pm = String.fromCharCode(177);
-    if (!worth && !bshow) {
-      h += '<div class="tiles">' + tile('Win rate now', pvPct(plan.cur.score) + '%', pm + seTxt(plan.cur.se)) +
-        tile('Best found', pvPct(f.score) + '%', pts1(f.gain) + ' ' + pm + seTxt(f.se)) +
-        tile('Verdict', 'In range', 'keep your build', 'good') + '</div>';
-      h += line('The best change found is worth ' + pts1(f.gain) + ' points of win rate, give or take ' + seTxt(f.se) +
-        '. That is inside the noise, so it is not a real improvement and your build stays as it is.');
-      h += confLine(plan);
-      h += '<div class="row"><button class="act" id="b_showbest">Show the best found anyway</button></div>';
-      return h + metaTable(pv, t0);
-    }
-    h += '<div class="tiles">' + tile('Damage', grp(f.totals.damage), 'now ' + grp(t0.damage)) + tile('Health', grp(f.totals.hp), 'now ' + grp(t0.hp)) +
-      tile('Win rate', pvPct(f.score) + '%', pts1(f.gain) + ' ' + pm + seTxt(f.se), worth ? 'good' : '') + '</div>';
-    h += sect('Suggested build') + buildTables(f.build, f.totals, pv, t0);
-    h += hitLines(t0, plan.ref, f.totals);
-    if (worth) h += line('Free changes only, nothing to buy. Green is different from your current build. Worth ' + pts1(f.gain) +
-      ' points of win rate, give or take ' + seTxt(f.se) + ', measured against the same opponents with the same rolls.');
-    else h += line('Worth ' + pts1(f.gain) + ' points give or take ' + seTxt(f.se) + ': inside the noise.', 'warn');
-    h += confLine(plan);
-    return h + metaTable(pv, t0);
-  }
-
-  function renderUp(pv, plan) {
-    var h = '', rows;
-    if (plan && !plan.stop) rows = plan.next;
-    else {
-      rows = []; pv.gear.forEach(function (g, i) { rows = rows.concat(pvUpgradeRows(pv, null, 0, i)); });
-      if (!plan && S.battles.length) h += waitLine();
-      if (plan && plan.thin) h += line('Costs only: with ' + plan.pool + ' duel' + (plan.pool === 1 ? '' : 's') +
-        ' on record out of ' + plan.floor + ', there is not enough to say what an upgrade is worth.', 'warn');
-      else if (plan) h += line('Costs only: every opponent on record is already settled either way, so no upgrade would change a result.', 'warn');
-    }
-    if (plan && !plan.stop && plan.buy.steps.length) {
-      h += '<div class="tiles">' + tile('Win rate now', pvPct(plan.cur.score) + '%', '') + tile('After buying', pvPct(plan.buy.score) + '%', pts1(plan.buy.gain) + ' points', 'good') + tile('Steps', String(plan.buy.steps.length), 'upgrades') + '</div>';
-      h += sect('Affordable now') + tbl(['Piece', 'Upgrade', 'Cost'], plan.buy.steps.map(function (x) {
-        return [cap(x.name), cap(x.kind) + ' ' + x.from + ' \u2192 ' + x.to, grp(x.cost) + ' ' + x.res];
-      }));
-    }
-    rows = rows.slice().sort(function (a, b) { return (b.gain === null ? 0 : b.gain) - (a.gain === null ? 0 : a.gain); }).slice(0, 6);
-    h += sect('Next upgrades') + tbl(['Upgrade', 'Cost', 'You have', 'Gain'], rows.map(function (r) {
-      return [cap(r.name) + ' ' + r.kind + ' ' + (r.from + 1), grp(r.cost) + ' ' + r.res, { t: grp(r.have), c: r.have >= r.cost ? 'good' : '' }, r.gain === null ? null : pts1(r.gain)];
-    }));
-    h += line('Gain is the change in win rate, in points, from that one upgrade on its own.');
-    if (plan && !plan.stop) h += confLine(plan);
-    return h;
-  }
-
-  var PV_CHECK_SIMS = 40;
-
-  var PV_CHECK_MAX = 40;
-
-  function pvCheckRun() {
-    if (pvCheckBusy) return;
-    // Only the recent ones: the check is a sanity reading on the model, not a
-    // census, and replaying 200 duels trickles work for nine seconds.
-    var todo = S.battles.slice(-PV_CHECK_MAX).filter(function (r) { return !pvCheck[arKey(r)]; });
-    if (!todo.length) return;
-    pvCheckBusy = true;
-    // All of them in one background job (12i), each result as it comes.
-    var w = wkRun({ kind: 'replay', recs: todo, sims: PV_CHECK_SIMS }, function (m) {
-      if (m.type === 'replay') pvCheck[arKey(todo[m.i])] = m.res || { p: null, rounds: null };
-      if (m.type === 'done' || m.type === 'error') {
-        todo.forEach(function (r) { if (!pvCheck[arKey(r)]) pvCheck[arKey(r)] = { p: null, rounds: null }; });
-        pvCheckBusy = false;
-      }
-      if (panel.style.display !== 'none' && tab === 'battle' && bsub === 'fights') render();
-    });
-    if (!w) { todo.forEach(function (r) { pvCheck[arKey(r)] = { p: null, rounds: null }; }); pvCheckBusy = false; }
-  }
-
-  function renderFights() {
-    var recs = S.battles, h = '', n = recs.length;
-    var wins = recs.filter(function (r) { return r.w; }).length, stale = recs.filter(function (r) { return r.a; }).length;
-    var plan = pvMemo.plan;
-    h += '<div class="tiles">' +
-      tile('Recorded', n + ' / ' + AR_MAX, n < PV_FLOOR ? (PV_FLOOR - n) + ' more to use real opponents' :(n ? 'last ' + whenTxt(recs[n - 1].t).toLowerCase() : 'none yet'),
-        n < PV_FLOOR ? 'warn' : '') +
-      tile('Record', wins + (wins === 1 ? ' win' : ' wins'), (n - wins) + (n - wins === 1 ? ' loss' : ' losses')) +
-      tile('Useful', plan && plan.contested !== undefined ? String(plan.contested) : '--',
-        plan && plan.contested !== undefined ? plan.decided + ' already settled' : 'not worked out yet',
-        plan && plan.contested >= PV_CONTESTED ? 'good' : '') + '</div>';
-    if (plan && plan.contested !== undefined)
-      h += line('Useful counts the opponents a change of build could actually swing. The settled ones are those this build always beats, or never beats: they look the same whatever you do, so the tuning ignores them.');
-    if (n) {
-      h += tbl(['When', 'Result', 'Their clones', 'Their damage', 'Rounds'], recs.slice(-6).reverse().map(function (r) {
-        return [whenTxt(r.t) + (r.a ? ' ~' : ''), { t: r.w ? 'Won' : 'Lost', c: r.w ? 'good' : 'bad' },
-          String(r.e.n), fmt(r.e.d, 0), String(r.r)];
-      }));
-      if (stale) h += line('~ marks a duel fought on a different build of yours. Its opponent is still recorded exactly, but the precision and evasion read off it are less reliable.');
-      var ok = recs.slice(-PV_CHECK_MAX).map(function (r) { return pvCheck[arKey(r)]; }).filter(function (x) { return x && x.p !== null; });
-      if (ok.length) {
-        var avgP = ok.reduce(function (a, x) { return a + x.p; }, 0) / ok.length, sim = ok.reduce(function (a, x) { return a + x.rounds; }, 0) / ok.length;
-        var real = recs.reduce(function (a, r) { return a + r.r; }, 0) / n;
-        h += kvs([['Model check', 'real winner in ' + pct(avgP, 0) + ' of replays'], ['Rounds', Math.round(real) + ' real / ' + Math.round(sim) + ' simulated']]);
-        h += line('Each duel is replayed with the two fighters as recorded. Opponent precision, evasion, skills and crit are estimates; clones, health and damage are read from the log.');
-      }
-    } else {
-      h += line('Recording runs in the background, whatever tab is open. Fight in the arena, or open any duel in Battlefield > Battle Log > Arena, and it is filed away here.');
-    }
-    var kb = n ? Math.max(1, Math.round(JSON.stringify(recs).length / 1024)) : 0;
-    h += kvs([['Stored', kb + ' KB'], ['Names', 'not saved']]);
-    h += '<div class="row"><label class="c"><input type="checkbox" id="f_rec"' + (S.inputs.recBattles === false ? '' : ' checked') + '>Record duels</label></div>';
-    if (n) h += '<div class="row" style="margin-top:0"><button class="act" id="b_clearrec">Clear recorded duels</button></div>';
-    if (n) pvCheckRun();
-    return h;
-  }
 
   /* ============================================================
      THE PAGE
@@ -4235,6 +4130,7 @@
     'a.grab{display:inline-block;padding:4px 10px;border:1px dashed var(--ac);border-radius:7px;color:var(--ac);font-weight:700;text-decoration:none;cursor:grab}',
     '.how summary{cursor:pointer;font-size:14px}.how ol{margin:6px 0 8px 18px;padding:0}.how li,.box ol li{margin:5px 0;line-height:1.45;font-size:12.5px}#grabbox ol{margin:6px 0 6px 18px;padding:0}',
     '.scrolly{max-height:68vh;overflow:auto}.scrolly thead th{position:sticky;top:0;background:var(--card);z-index:1}.plbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.plbar select,.plbar input{max-width:200px}',
+    '.tabp>*+*{margin-top:14px}details.more>summary{cursor:pointer;font-weight:600;font-size:14px;color:var(--tx)}details.more[open]>summary{margin-bottom:10px}details.more:not(.box){margin-top:12px}.vsrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.vsrow b{font-size:15px}.vsrow select{flex:1 1 260px;max-width:460px;font-size:14px;min-height:38px}',
     '.pick tbody tr{cursor:pointer}.pick tbody tr:hover td{background:rgba(127,160,200,.12)}',
     '.filebtn{position:relative;overflow:hidden;display:inline-block}.filebtn input{position:absolute;inset:0;opacity:0;cursor:pointer}',
     '@media (max-width:520px){.form{grid-template-columns:1fr}.tiles{grid-template-columns:1fr 1fr}table.t{font-size:11px}table.t td,table.t th{padding:4px 5px}}'
@@ -4257,68 +4153,54 @@
   root.innerHTML =
     '<div class="page' + (ALLTABS ? ' all' : '') + '">' +
     '<div class="top"><div class="hd" style="margin:0"><h1>⚔ PvP Build Planner <span class="beta">beta</span></h1><span class="sub">' + esc(t('for Stellar Odyssey · fan-made')) + ' · v' + esc(PAGE_VER) + '</span><span class="sp"></span><span class="pill" id="datapill"></span><span class="pill" id="cloudpill" style="display:none"></span>' + langPick() + '<span class="g" id="theme">◐ ' + esc(t('theme')) + '</span></div>' +
-    '<nav class="nav" aria-label="' + esc(t('Sections')) + '">' + [['build', 'My build'], ['players', 'Players'], ['squad', 'Squadron Groups'], ['import', 'Import fights']].map(function (x) {
+    '<nav class="nav" aria-label="' + esc(t('Sections')) + '">' + [['build', 'Arena'], ['squad', 'Battlefield'], ['import', 'Import']].map(function (x) {
       return '<button data-tab="' + x[0] + '">' + esc(t(x[1])) + '</button>';
     }).join('') + '</nav></div>' +
 
-    // ---- My build
+    // ---- Arena: the best build against one opponent
     '<section class="tabp" data-p="build">' +
-    '<div id="status"></div>' +
-    '<div class="box" style="margin:0 0 12px"><h4 style="margin-top:0">' + esc(t('Plan against')) + '</h4><div id="vsbody"></div></div>' +
+    '<div class="box"><div id="vsbody"></div></div>' +
     '<div id="out"></div>' +
-    '<div class="box" style="margin-top:16px"><h4 style="margin-top:0">' + esc(t('Settings')) + '</h4><div class="grid">' +
+    '<details class="box more" id="plbox"' + (ALLTABS ? ' open' : '') + '><summary id="plsum">' + esc(t('All players')) + '</summary><div id="plbody"></div></details>' +
+    '<details class="box more"' + (ALLTABS ? ' open' : '') + '><summary>' + esc(t('Settings')) + '</summary><div class="grid">' +
     '<label>' + esc(t('PvP Badges to keep')) + '<input type="number" min="0" step="1" id="f_kb" value="' + esc(String(S.inputs.keepBadges)) + '"></label>' +
     '<label>' + esc(t('Least gain worth a change (win %)')) + '<input type="number" min="0" step="any" id="f_gap" value="' + esc(String(S.inputs.bestGap)) + '"></label>' +
-    '</div></div>' +
+    '</div></details>' +
     '</section>' +
 
-    // ---- Players
-    '<section class="tabp" data-p="players"><div id="plbody"></div></section>' +
+    // ---- Battlefield: the best groups against the enemy's
+    '<section class="tabp" data-p="squad"><div class="box"><div id="sqbody"></div></div></section>' +
 
-    // ---- Squadron Groups
-    '<section class="tabp" data-p="squad"><div class="box"><h4 style="margin-top:0">' + esc(t('Squadron Groups')) + '</h4><div id="sqbody"></div></div></section>' +
-
-    // ---- Import fights
+    // ---- Import
     '<section class="tabp" data-p="import">' +
-    '<details class="box how" id="howto"' + (firstVisit ? ' open' : '') + '><summary><b>' + esc(t('How to use')) + '</b></summary>' +
-    B('This page plans your PvP build and your squadron groups. First bring in your fights, in one of these ways:') +
-    '<ol>' +
-    '<li>' + t('<b>Everything, automatically (best):</b> install <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">Tampermonkey</a>, then <a href="{0}" target="_blank" rel="noopener">install PvP Meta</a>. In the game, open Battlefield › Battle Log › Squadron, set 50 per page and click through every page once; open Squadron Groups; click View battle on your arena duels. Then click <b>⚔ PvP Meta › Open in planner ↗</b>: this page opens with everything loaded. From then on it keeps what you browse by itself.', [SCRIPT_URL]) + '</li>' +
-    '<li>' + t('<b>Without installing anything:</b> use the <b>PvP Planner button</b> (below). It works the same way, for one visit.') + '</li>' +
-    '<li>' + t('<b>Your build only:</b> in the game open Profile › Game API, copy your key, paste it below and click <b>Load my build</b>. The plan is then against typical players at your strength.') + '</li>' +
-    '</ol>' +
-    B('<b>Arena made easy:</b> open Battlefield › Battle Log › Arena once (50 per page) with the script or the button running. That list alone is enough for every opponent already seen in a squadron battle; View battle is only needed for players never met there.') +
-    B('Then open <b>My build</b> to plan against typical players, your arena opponents, one player or one squadron; <b>Players</b> to see the build of everyone you met; <b>Squadron Groups</b> to set up and check your groups.') +
-    B('Nothing here acts in the game or changes anything in it. The only thing sent anywhere is Load my build, which reads your account through the game\'s official read-only API with your own key. The game rules allow tools for information only. Your data stays in this browser.', 'mu') +
-    '</details>' +
-    '<div class="box" style="margin-top:16px"><h4 style="margin-top:0">' + esc(t('Your fights')) + '</h4><div id="impstat"></div>' +
-    '<div class="btns"><label class="sec filebtn">' + esc(t('Load file (.json)')) + '<input type="file" id="f_arcfile" accept=".json,application/json"></label><button class="sec" id="b_impshare">' + esc(t('Save a share file')) + '</button><button class="sec" id="b_archdl">' + esc(t('Download saved data')) + '</button><button class="sec" id="b_impclr">' + esc(t('Forget imported data')) + '</button></div>' +
+    '<div class="box"><h4 style="margin-top:0">' + esc(t('Your fights')) + '</h4><div id="impstat"></div>' +
+    '<div class="btns"><label class="sec filebtn">' + esc(t('Load file (.json)')) + '<input type="file" id="f_arcfile" accept=".json,application/json"></label></div>' +
+    '<div id="impmsg" class="line"></div>' +
     '<div id="shbox"></div>' +
-    '<details id="grabbox" style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">' + esc(t('No script? Use the PvP Planner button')) + '</summary>' +
-    B('It brings your own squadron battles and arena duels here without installing anything. Like the script, it only reads what the game shows you: it sends nothing to the game and clicks nothing. It works in a web browser such as Chrome, Edge or Firefox (not inside the Steam app).') +
+    '<details class="more"' + (ALLTABS ? ' open' : '') + '><summary>' + esc(t('More')) + '</summary><div class="btns"><button class="sec" id="b_impshare">' + esc(t('Save a share file')) + '</button><button class="sec" id="b_archdl">' + esc(t('Download saved data')) + '</button><button class="sec" id="b_impclr">' + esc(t('Forget imported data')) + '</button></div></details>' +
+    '</div>' +
+    '<details class="box how more" id="howto"' + (firstVisit || ALLTABS ? ' open' : '') + '><summary>' + esc(t('How to bring your fights in')) + '</summary>' +
     '<ol>' +
-    '<li>' + t('Show your bookmarks bar (Ctrl+Shift+B), then drag this button onto it:') + ' <a id="grablink" class="grab" href="#">⚔ PvP Planner</a></li>' +
-    '<li>' + t('Open the game in the same browser and click that bookmark. A small PvP Planner box appears in the bottom right corner.') + '</li>' +
-    '<li>' + t('In the game, open Battlefield › Battle Log › Squadron, set 50 per page and click through every page; open Squadron Groups; click View battle on each arena duel you want. The box counts what it has kept.') + '</li>' +
-    '<li>' + t('Click <b>Send to planner</b> in the box. This page opens with everything loaded. If the browser blocks the new tab, allow pop-ups for the game site and click again.') + '</li>' +
+    '<li>' + t('<b>Script (best):</b> install <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">Tampermonkey</a>, then <a href="{0}" target="_blank" rel="noopener">PvP Meta</a>. In the game open Battlefield › Battle Log › Squadron (50 per page, every page), Battle Log › Arena and Squadron Groups. Then click <b>⚔ PvP Meta › Open in planner ↗</b>.', [SCRIPT_URL]) + '</li>' +
+    '<li id="grabbox">' + t('<b>No install:</b> drag this button to your bookmarks bar (Ctrl+Shift+B shows it):') + ' <a id="grablink" class="grab" href="#">⚔ PvP Planner</a> ' + t('Click it on the game page, open the same three pages, then click <b>Send to planner</b>. Web browsers only, not the Steam app.') +
+    ' <button class="sec" id="b_grabcopy" style="padding:3px 9px;font-size:12px">' + esc(t('Copy the code')) + '</button> <span class="mu">' + esc(t('(for the F12 console, if bookmarks are not possible)')) + '</span></li>' +
+    '<li>' + t('<b>Build only:</b> paste your API key below.') + '</li>' +
     '</ol>' +
-    B('Cannot use bookmarks? On the game page press F12, open the Console tab, paste the code (button below) and press Enter. Chrome asks you to type "allow pasting" the first time. Then steps 3 and 4.', 'mu') +
-    '<div class="btns"><button class="sec" id="b_grabcopy">' + esc(t('Copy the code')) + '</button></div>' +
-    B('Reloading the game tab ends it: click the bookmark again next time.', 'mu') +
+    B('Read-only: nothing here acts in the game. View battle on an arena duel is only needed for a player never seen in a squadron battle.', 'mu') +
     '</details>' +
-    '<div id="impmsg" class="line"></div></div>' +
-    '<div class="box" style="margin-top:16px"><h4 style="margin-top:0">' + esc(t('Your build from the API')) + '</h4>' +
+    '<div class="box"><h4 style="margin-top:0">' + esc(t('Your build from the API')) + '</h4>' +
     '<div class="form">' +
     '<label>' + esc(t('Realm')) + '<select id="f_realm"><option value="steam">Steam</option><option value="web">Web</option></select></label>' +
     '<label>' + esc(t('Your API key')) + '<input type="password" id="f_key" autocomplete="off" spellcheck="false" placeholder="' + esc(t('Profile › Game API in the game')) + '"></label>' +
     '</div>' +
     '<div class="btns"><button class="pri" id="b_load">' + esc(t('Load my build')) + '</button><button class="sec" id="b_sample">' + esc(t('Try with sample data')) + '</button>' +
     '<label class="c" style="margin-left:auto"><input type="checkbox" id="f_remember"' + (savedKey ? ' checked' : '') + '>' + esc(t('Remember key on this device')) + '</label></div>' +
-    B('Your key is sent only to the game\'s own public API, straight from this browser. Each load uses 1 of your 50 daily calls to /user; a load within 30 minutes reuses the last answer for free.') +
+    '<div id="status"></div>' +
+    B('The key goes only to the game\'s own API, from this browser. One load uses 1 of your 50 daily calls; a reload within 30 minutes is free.', 'mu') +
     '</div>' +
     '</section>' +
 
-    '<div class="foot">' + esc(t('Unofficial fan tool, not made by the game\'s developers. It only reads your account through the official read-only API; it cannot change anything in the game. The planner is the duel simulator of the Astrolabe userscript: typical players use the split found by self-play at equal total stats (35% power, 15% precision, 15% evasion, 35% hull, Block on every piece).')) + '</div>' +
+    '<div class="foot">' + esc(t('Unofficial fan tool. Read-only: it cannot change anything in the game.')) + '</div>' +
     '</div>';
 
   i18nStart(root);
@@ -4326,6 +4208,7 @@
   $('f_lang').addEventListener('change', function () { try { localStorage.setItem('sopvpweb:lang', JSON.stringify($('f_lang').value)); } catch (e) {} location.reload(); });
   // The four tabs. A first visit with nothing loaded opens on Import fights.
   var TAB = store.get('tab', null) || (store.get('imp', null) || store.get('cache', null) ? 'build' : 'import');
+  if (TAB !== 'build' && TAB !== 'squad' && TAB !== 'import') TAB = 'build';   // the Players tab is gone (1.8.0)
   function showTab(x) {
     TAB = x; store.set('tab', x);
     root.querySelectorAll('.nav button').forEach(function (b) { b.className = b.getAttribute('data-tab') === x ? 'on' : ''; });
@@ -4342,12 +4225,14 @@
     el.innerHTML = nb || nd ? '<span class="dot"></span>' + esc(t('{0} battles · {1} duels', [grp(nb), grp(nd)])) + (typeof clOn === 'function' && clOn() ? ' · ' + esc(t('shared')) : '') : (S.storeOk ? '<span class="dot"></span>' + esc(t('build loaded, no fights yet')) : esc(t('nothing loaded yet')));
   }
   // Players: everyone met, their estimated build, and a way to plan against them.
+  // All players, folded under the Arena result: a click plans against one.
   var PL_Q = '', PL_SQ = '', PL_SORT = store.get('plsort', 't');
-  function renderPlayers(jump) {
-    var el = root.querySelector('#plbody');
+  function renderPlayers() {
+    var el = root.querySelector('#plbody'), sm = root.querySelector('#plsum');
     if (!el) return;
     dataPill();
-    if (!IMP) { el.innerHTML = '<div class="box">' + line(t('No fights yet: bring them in on the Import fights tab.'), 'warn') + '</div>'; return; }
+    if (sm) sm.textContent = t('All players') + (IMP ? ' (' + IMP.x.players.length + ')' : '');
+    if (!IMP) { el.innerHTML = line(t('No fights yet: bring them in on the Import tab.'), 'warn'); return; }
     var q = PL_Q.toLowerCase(), all = IMP.x.players, elo = plElo(), sqs = {}, nosq = 0;
     all.forEach(function (p) { if (p.sq) sqs[p.sq] = (sqs[p.sq] || 0) + 1; else nosq++; });
     if (PL_SQ && PL_SQ !== '-' && !sqs[PL_SQ]) PL_SQ = '';
@@ -4363,35 +4248,30 @@
       if (PL_SORT === 'd') return (y.d || 0) - (x.d || 0);
       return (y.t || 0) - (x.t || 0);
     });
-    var sel = vsCard(VS.pl) || list[0] || null;
-    var opt = function (v, txt, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(txt) + '</option>'; };
-    var h = '<div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">';
-    h += '<div class="box" style="flex:999 1 520px;min-width:0"><div class="plbar"><h4 style="margin:0">' + esc(t('Players seen')) + ' (' + (list.length === all.length ? all.length : list.length + ' / ' + all.length) + ')</h4><span class="sp" style="flex:1"></span>' +
-      plSelect('f_plsel', sel ? sel.name : null) +
+    var cur = vsKind() === 'player' ? VS.pl : null;
+    var opt = function (v, txt, c) { return '<option value="' + esc(v) + '"' + (v === c ? ' selected' : '') + '>' + esc(txt) + '</option>'; };
+    var h = '<div class="plbar">' +
       '<select id="f_plsq">' + opt('', t('All squadrons ({0})', [Object.keys(sqs).length]), PL_SQ) + Object.keys(sqs).sort(function (x, y) { return low(x) < low(y) ? -1 : 1; }).map(function (k) { return opt(k, k + ' (' + sqs[k] + ')', PL_SQ); }).join('') + (nosq ? opt('-', t('No squadron known ({0})', [nosq]), PL_SQ) : '') + '</select>' +
       '<select id="f_plsort">' + [['t', t('Sort: last fight')], ['n', t('Sort: name')], ['s', t('Sort: squadron')], ['e', t('Sort: arena Elo')], ['d', t('Sort: damage')]].map(function (x) { return opt(x[0], x[1], PL_SORT); }).join('') + '</select>' +
-      '<input type="search" id="f_plq" value="' + esc(PL_Q) + '" placeholder="' + esc(t('name or squadron')) + '"></div>';
-    h += '<div class="card wide scrolly" style="margin-top:8px"><table class="t pick"><thead><tr><th>' + esc(t('Player')) + '</th><th>' + esc(t('Squadron')) + '</th><th>' + esc(t('Last fight')) + '</th><th>' + esc(t('Arena Elo')) + '</th><th>' + esc(t('Precision')) + '</th><th>' + esc(t('Evasion')) + '</th><th>' + esc(t('Skills')) + '</th></tr></thead><tbody>' +
+      '<input type="search" id="f_plq" value="' + esc(PL_Q) + '" placeholder="' + esc(t('name or squadron')) + '">' +
+      (list.length !== all.length ? '<span class="mu">' + list.length + ' / ' + all.length + '</span>' : '') + '</div>';
+    h += '<div class="card wide scrolly" style="margin-top:8px;max-height:60vh"><table class="t pick"><thead><tr><th>' + esc(t('Player')) + '</th><th>' + esc(t('Squadron')) + '</th><th>' + esc(t('Last fight')) + '</th><th>' + esc(t('Arena Elo')) + '</th><th>' + esc(t('Damage')) + '</th><th>' + esc(t('Health')) + '</th><th>' + esc(t('Precision')) + '</th><th>' + esc(t('Evasion')) + '</th><th>' + esc(t('Skills')) + '</th></tr></thead><tbody>' +
       list.map(function (p) {
         var e1 = estTxt(p.P), e2 = estTxt(p.E);
-        return '<tr data-plp="' + esc(p.name) + '"' + (sel && p.name === sel.name ? ' class="hl"' : '') + '><td><b>' + esc(p.name) + '</b></td><td>' + esc(p.sq || t('arena')) + '</td><td' + (vsOld(p.t) ? ' class="warn"' : '') + '>' + esc(whenTxt(p.t)) + '</td><td>' + (elo[p.name] ? esc(grp(elo[p.name].e)) : '<span class="mu">–</span>') + '</td><td class="' + e1.c + '">' + esc(e1.t) + '</td><td class="' + e2.c + '">' + esc(e2.t) + '</td><td>' + esc(skTxt(p.sk)) + (p.sk && p.skc < 0.6 ? ' ?' : '') + '</td></tr>';
+        return '<tr data-plp="' + esc(p.name) + '"' + (p.name === cur ? ' class="hl"' : '') + '><td><b>' + esc(p.name) + '</b></td><td>' + esc(p.sq || '–') + '</td><td' + (vsOld(p.t) ? ' class="warn"' : '') + '>' + esc(whenTxt(p.t)) + '</td><td>' + (elo[p.name] ? esc(grp(elo[p.name].e)) : '<span class="mu">–</span>') + '</td><td>' + esc(grp(p.d)) + '</td><td>' + esc(grp(p.h)) + '</td><td class="' + e1.c + '">' + esc(e1.t) + '</td><td class="' + e2.c + '">' + esc(e2.t) + '</td><td>' + esc(skTxt(p.sk)) + (p.sk && p.skc < 0.6 ? ' ?' : '') + '</td></tr>';
       }).join('') + '</tbody></table></div>';
-    h += line(t('Orange: last fight more than 7 days ago, their build may have changed. Click a player to see their build.'), 'mu') +
-      line(t('Arena Elo comes from the Arena list (Battle Log › Arena) of everyone who shares; a dash means nobody has listed a fight with them yet.'), 'mu') + '</div>';
-    h += '<div class="box" style="flex:1 1 340px;min-width:0">' + (sel ? vsBuildCard(sel) + '<div class="btns"><button class="pri" id="b_plvs">' + esc(t('Plan against {0}', [sel.name])) + '</button></div>' : line(t('No player matches.'), 'mu')) + '</div>';
-    h += '</div>';
+    h += line(t('Click a player to plan against them. Orange: last fight more than 7 days ago. ± is the doubt in the estimate.'), 'mu');
     var keep = (el.querySelector('.scrolly') || {}).scrollTop || 0;
     el.innerHTML = h;
     var box = el.querySelector('.scrolly');
-    if (box) { box.scrollTop = keep; if (jump) plShow(el); }
+    if (box) box.scrollTop = keep;
     var qi = el.querySelector('#f_plq');
-    if (qi) qi.addEventListener('input', function () { PL_Q = qi.value; var pos = qi.selectionStart; renderPlayers(); var n = root.querySelector('#f_plq'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} } });
+    qi.addEventListener('input', function () { PL_Q = qi.value; var pos = qi.selectionStart; renderPlayers(); var nq = root.querySelector('#f_plq'); if (nq) { nq.focus(); try { nq.setSelectionRange(pos, pos); } catch (e) {} } });
     el.querySelector('#f_plsq').addEventListener('change', function () { PL_SQ = el.querySelector('#f_plsq').value; renderPlayers(); });
     el.querySelector('#f_plsort').addEventListener('change', function () { PL_SORT = el.querySelector('#f_plsort').value; store.set('plsort', PL_SORT); renderPlayers(); });
-    el.querySelector('#f_plsel').addEventListener('change', function () { var v = el.querySelector('#f_plsel').value; if (!v) return; PL_Q = ''; PL_SQ = ''; VS.pl = v; store.set('vs', VS); renderPlayers(true); });
-    el.querySelectorAll('tr[data-plp]').forEach(function (r) { r.addEventListener('click', function () { VS.pl = r.getAttribute('data-plp'); store.set('vs', VS); renderPlayers(); }); });
-    var pb = el.querySelector('#b_plvs');
-    if (pb) pb.addEventListener('click', function () { VS.kind = 'player'; VS.pl = sel.name; store.set('vs', VS); renderVs(); render(); showTab('build'); });
+    el.querySelectorAll('tr[data-plp]').forEach(function (r) {
+      r.addEventListener('click', function () { vsPick('pl:' + r.getAttribute('data-plp')); var top = root.querySelector('#vsbody'); if (top && top.scrollIntoView) top.scrollIntoView({ block: 'center' }); });
+    });
   }
   var realmEl = $('f_realm'), keyEl = $('f_key'), remEl = $('f_remember'), statusEl = $('status'), out = $('out');
   realmEl.value = store.get('realm', 'steam') === 'web' ? 'web' : 'steam';
@@ -4406,23 +4286,18 @@
 
   function render() {
     try {
-      if (!S.storeState) { out.innerHTML = ''; return; }
+      if (!S.storeState) { out.innerHTML = '<div class="box">' + line(t('No build yet: load yours on the Import tab (script, button or API key).'), 'warn') + '</div>'; return; }
       if (!S.storeOk) {
-        out.innerHTML = '<div class="box">' + line('Your PvP build could not be read from the answer.', 'bad') + apiNotes.map(function (n) { return line(n, 'warn'); }).join('') + '</div>';
+        out.innerHTML = '<div class="box">' + line('Your PvP build could not be read from the answer.', 'bad') + apiNotes.map(function (x) { return line(x, 'warn'); }).join('') + '</div>';
         return;
       }
-      var keep = out.scrollTop;
-      var pv = readPvp(S.storeState), h = vsFix(renderBattle());
-      h += kvs([['Clones', String(pv.N)], ['Gear pieces', String(pv.gear.length)], ['Stat points', grp(pv.pool)], ['PvP badges', grp(pv.badges)], ['Crafting level', String(pv.craft)], ['Velari bonus', '+' + grp(pv.vel)]]);
-      h += apiNotes.map(function (n) { return line(n, 'warn'); }).join('');
+      var open = !!(out.querySelector('details.more') || {}).open;
+      var h = vsFix(renderBattle());
+      h += apiNotes.map(function (x) { return line(x, 'warn'); }).join('');
       if (S.lastErr) h += line(S.lastErr, 'bad');
       out.innerHTML = h;
-      out.scrollTop = keep;
-      out.querySelectorAll('.seg button').forEach(function (b) {
-        b.addEventListener('click', function () { bsub = b.getAttribute('data-sub'); bshow = false; render(); });
-      });
-      var sb = out.querySelector('#b_showbest');
-      if (sb) sb.addEventListener('click', function () { bshow = true; render(); });
+      var det = out.querySelector('details.more');
+      if (det && (open || ALLTABS)) det.open = true;
     } catch (e) {
       out.innerHTML = line('Drawing failed: ' + ((e && e.message) || e), 'bad');
     }
