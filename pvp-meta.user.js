@@ -1,11 +1,16 @@
 // ==UserScript==
 // @name         Stellar Odyssey – PvP Meta
 // @namespace    stellarodyssey-pvpmeta
-// @version      1.4.0
-// @description  Arena build planner for Stellar Odyssey: the meta split at your own total stat, the best free re-spec, which upgrades pay, and a record of your duels. Built from Astrolabe 3.22.9's simulator. Keeps the squadron battles, arena duels and roster you browse, and opens them in the web planner in one click (player and squadron picker). Reads the page only: no network requests, no game actions.
+// @version      1.5.0
+// @description  Arena build planner for Stellar Odyssey: the meta split at your own total stat, the best free re-spec, which upgrades pay, and a record of your duels. Built from Astrolabe 3.22.9's simulator. Keeps the squadron battles, arena duels and roster you browse, and opens them in the web planner in one click (player and squadron picker). Reads the page only: no network requests, no game actions. On the planner page it only hands new data over from the game tab.
 // @match        *://steam.stellarodyssey.app/*
+// @match        https://johnnyboyqc.github.io/stellar-odyssey-pvp-planner/*
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_addValueChangeListener
+// @grant        GM_listValues
+// @grant        GM_deleteValue
+// @grant        unsafeWindow
 // @run-at       document-start
 // @homepageURL  https://github.com/JohnnyBoyQC/stellar-odyssey-pvp-planner
 // @downloadURL  https://raw.githubusercontent.com/JohnnyBoyQC/stellar-odyssey-pvp-planner/main/pvp-meta.user.js
@@ -29,6 +34,61 @@
      information and display only).
      ============================================================ */
 
+  /* ---- on the planner page: only the live hand-over (1.5.0) ----
+     The same script also runs on the PvP Build Planner page. There it draws
+     nothing and reads nothing from the game: it watches the outboxes the game tabs
+     fill (script manager storage, never the network), one per game tab and realm,
+     and hands new items to the planner page in small batches. The page answers
+     with the last item it has SAVED; anything not acknowledged is handed over again. */
+  if (/^johnnyboyqc\.github\.io$/i.test(location.hostname) && /^\/stellar-odyssey-pvp-planner\//.test(location.pathname) || /^localhost$/i.test(location.hostname) && /[?&]sopvp_bridge\b/.test(location.search)) { plBridge(); return; }
+  function plBridge() {
+    if (typeof GM_getValue !== 'function') return;
+    var PAGE = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window, BATCH = 300, RETRY_MS = 20000;
+    var sent = {};   // box key -> { seq: highest handed over, at: when }
+    function get(k) { try { var r = GM_getValue(k); return r === undefined ? null : JSON.parse(r); } catch (e) { return null; } }
+    function set(k, v) { try { GM_setValue(k, JSON.stringify(v)); } catch (e) {} }
+    function fromPage(e) { return e && e.origin === location.origin && (e.source === window || e.source === PAGE || e.source === null); }
+    function boxes() {
+      var ks = [];
+      try { ks = typeof GM_listValues === 'function' ? GM_listValues() : []; } catch (e) { ks = []; }
+      return ks.filter(function (k) { return /^sopvp:out:/.test(k); });
+    }
+    var ready = false;
+    function hand() {
+      if (!ready) return;
+      var inputs = get('sopvp:inputs') || {};
+      if (inputs.live !== true) return;   // live hand-over is off unless ticked in the game tab's Settings
+      boxes().forEach(function (k) {
+        var box = get(k), ack = get(k.replace(':out:', ':ack:')) || 0, s = sent[k];
+        if (!box || !Array.isArray(box.items)) return;
+        // Clean up a finished outbox of a game tab that has been gone for a day.
+        if (!box.items.some(function (x) { return x.seq > ack; }) && Date.now() - (box.upd || 0) > 86400000) {
+          try { if (typeof GM_deleteValue === 'function') { GM_deleteValue(k); GM_deleteValue(k.replace(':out:', ':ack:')); } } catch (e) {}
+          return;
+        }
+        var from = s && Date.now() - s.at < RETRY_MS ? Math.max(ack, s.seq) : ack;   // not acknowledged in time: again
+        var items = box.items.filter(function (x) { return x.seq > from; }).slice(0, BATCH);
+        if (!items.length) return;
+        sent[k] = { seq: items[items.length - 1].seq, at: Date.now() };
+        PAGE.postMessage({ sopvpLive: items, box: k, realm: box.realm || 'steam' }, location.origin);
+      });
+    }
+    window.addEventListener('message', function (e) {
+      var d = e && e.data;
+      if (!d || !fromPage(e)) return;
+      if (d.sopvpLiveReady) { ready = true; hand(); }
+      // Only a box we handed out, and never past what we handed out.
+      if (d.sopvpLiveAck && typeof d.sopvpLiveAck.box === 'string' && /^sopvp:out:/.test(d.sopvpLiveAck.box) && typeof d.sopvpLiveAck.seq === 'number') {
+        var k = d.sopvpLiveAck.box, s = sent[k], ak = k.replace(':out:', ':ack:');
+        if (s && d.sopvpLiveAck.seq <= s.seq && d.sopvpLiveAck.seq > (get(ak) || 0)) { set(ak, d.sopvpLiveAck.seq); s.at = 0; setTimeout(hand, 50); }
+      }
+    });
+    try { if (typeof GM_addValueChangeListener === 'function') GM_addValueChangeListener('sopvp:wake', function () { hand(); }); } catch (e) {}
+    // Say hello: the page answers "ready" (whenever this script starts).
+    PAGE.postMessage({ sopvpBridge: 1 }, location.origin);
+    setInterval(hand, 5000);
+  }
+
   /* ---- storage: its own keys, so it never touches Astrolabe's ---- */
   var store = {
     get: function (k, d) {
@@ -46,11 +106,17 @@
     }
   };
 
+  // Shown chances stay between 5% and 95% (1.11.0): on 166 real battles forecast
+  // before they happened, "0%" and "100%" were wrong about 1 time in 15, and this
+  // band scored best (docs/pvp-research/accuracy-research-2026-11-10.md).
+  function pvPct(score) { return Math.max(5, Math.min(95, Math.round(score))); }
+
   var PVP_DEFAULTS = {
     recBattles: true,   // record arena duels as they are fought or opened
     keepBadges: 0,      // PvP badges the upgrade plan must leave untouched
     bestGap: 2,         // floor on the gain worth a change; the real bar is twice the error bar
-    archive: true       // keep squadron battles, arena duels, roster and map as they are browsed
+    archive: true,      // keep squadron battles, arena duels, roster and map as they are browsed
+    live: false         // hand new items to an open planner tab (1.5.0); off until the player ticks it
   };
 
   var S = {
@@ -261,11 +327,14 @@
   // of [R, successes, tries]; a weak prior of one success and one failure at
   // the typical R keeps an all-hit or all-miss record finite. se is on the
   // log scale (0.1 = about +-10%).
-  function pxFit(obs) {
+  // prior (1.11.0): [centre, successes, tries] pseudo-swings at the gear-based
+  // first guess. It steadies the estimate but is kept out of n and info, so
+  // "enough fights" checks still count real swings only.
+  function pxFit(obs, prior) {
     var N = 0, S = 0, lr = 0;
     obs.forEach(function (o) { N += o[2]; S += o[1]; lr += o[2] * Math.log(o[0]); });
-    if (N < 1) return null;
-    var R0 = Math.exp(lr / N), all = obs.concat([[R0, 1, 2]]);
+    if (N < 1 && !prior) return null;
+    var R0 = N >= 1 ? Math.exp(lr / N) : prior[0], all = prior ? obs.concat([prior]) : obs.concat([[R0, 1, 2]]);
     var th = Math.log(R0) + Math.log((S + 1) / (N - S + 1)), h = 1;
     for (var it = 0; it < 50; it++) {
       var g = 0; h = 0;
@@ -275,7 +344,22 @@
       th += step;
       if (Math.abs(step) < 1e-7) break;
     }
-    return { v: Math.exp(th), se: 1 / Math.sqrt(h), n: N, info: h };
+    var hObs = 0;
+    obs.forEach(function (o) { var p = 1 / (1 + Math.exp(Math.log(o[0]) - th)); hObs += o[2] * p * (1 - p); });
+    return { v: Math.exp(th), se: 1 / Math.sqrt(h), n: N, info: prior ? hObs : h };
+  }
+  // Gear decides precision and evasion (2026-11-10 research): almost everyone has one
+  // piece per stat, so each is about 0.5 x (power + hull) (per clone, both exact in the
+  // logs). Players with power or hull 1.6x the other or more carry two pieces there and
+  // usually no evasion piece: precision about 0.33, evasion about 0.04 of power + hull.
+  // A soft mix of the two shapes; weight W pseudo-swings, lower when the shape is unclear.
+  var PX_PRIOR_W = 16;
+  function pxGear(d, h, n) { n = n || 1; return d / n + h / (7 * n); }
+  function pxShape(d, h, n) {
+    n = n || 1;
+    var pw = d / n, hl = h / (7 * n), r = pw > 0 && hl > 0 ? Math.abs(Math.log(pw / hl)) : 0;
+    var w = 1 / (1 + Math.exp(-(r - Math.log(1.6)) / 0.08));
+    return { p: 0.5 * (1 - w) + 0.33 * w, e: Math.exp(Math.log(0.5) * (1 - w) + Math.log(0.04) * w), w: w, W: PX_PRIOR_W * (1 - 3 * w * (1 - w)) };
   }
 
   function pxLogBin(x, n, p) {
@@ -423,11 +507,18 @@
     function P(u) { return players[u] || (players[u] = { name: u, sq: null, t: 0, nb: 0, nd: 0, snaps: [] }); }
     battles.sort(function (x, y) { return (pxNum(x.finished) || 0) - (pxNum(y.finished) || 0); });
     battles.forEach(function (b) {
-      var t = (pxNum(b.finished) || pxNum(b.created) || 0) * 1000, rs = rosterAt(t), idx = {};
+      var t = (pxNum(b.finished) || pxNum(b.created) || 0) * 1000, rs = rosterAt(t), idx = {}, bmem = {};
       if (rs) rs.m.forEach(function (m) { idx[m.user] = m; });
+      pxMembers(b.attacking_members).concat(pxMembers(b.defending_members)).forEach(function (m) { bmem[m.user] = m; });
       var res = pxBattle(b, function (u) {
         var m = idx[u];
-        if (m) return { p: m.tot.precision, e: m.tot.evasion };
+        // Our own members from the roster on file, scaled to the power + hull they
+        // had in THIS battle (the snapshot may be weeks newer; 1.11.0, Fable's fix).
+        if (m) {
+          var bm = bmem[u], ph = (m.tot.power || 0) + (m.tot.hull || 0), sc = bm && ph > 0 ? pxGear(bm.d, bm.h, bm.n) / ph : 1;
+          if (!(sc > 0 && isFinite(sc))) sc = 1;
+          return { p: m.tot.precision * sc, e: m.tot.evasion * sc };
+        }
         if (u === me && mePE) return mePE;
         return null;
       });
@@ -444,10 +535,12 @@
           p.snaps.forEach(function (x) { if (x.key === key) sn = x; });
           if (!sn) { sn = { key: key, d: m.d, h: m.h, n: m.n, cl: m.cl, t0: res.t, t1: res.t, nb: 0, p: [], e: [], sk: {}, skl: [] }; p.snaps.push(sn); }
           sn.nb++; sn.t0 = Math.min(sn.t0, res.t); sn.t1 = Math.max(sn.t1, res.t); sn.cl = m.cl;
-          var o = res.obs[m.user];
+          var o = res.obs[m.user], gg = pxGear(m.d, m.h, m.n) || 1;
           if (o) {
-            Object.keys(o.p).forEach(function (k) { sn.p.push(o.p[k].slice(0, 3).concat([res.t])); });
-            Object.keys(o.e).forEach(function (k) { sn.e.push(o.e[k].slice(0, 3).concat([res.t])); });
+            // Kept as shares of this player's power + hull at the time, so builds
+            // that grew still fit together (the reference stat is divided by it).
+            Object.keys(o.p).forEach(function (k) { var z = o.p[k].slice(0, 3).concat([res.t]); z[0] /= gg; sn.p.push(z); });
+            Object.keys(o.e).forEach(function (k) { var z = o.e[k].slice(0, 3).concat([res.t]); z[0] /= gg; sn.e.push(z); });
             pxSumSk(sn.sk, o.sk); sn.skl.push([res.t, o.sk]);
           }
         });
@@ -468,8 +561,9 @@
       if (!sn) { sn = { key: key, duel: 1, d: f.d, h: f.h, n: f.n, cl: null, t0: r.t, t1: r.t, nb: 0, p: [], e: [], sk: {}, skl: [], c: f.c }; p.snaps.push(sn); }
       sn.nb++; sn.t0 = Math.min(sn.t0, r.t); sn.t1 = Math.max(sn.t1, r.t);
       if (q && r.o.e > 0 && r.o.p > 0) {
-        sn.p.push([r.o.e, q[0], q[1], r.t]);
-        sn.e.push([r.o.p, Math.max(0, q[3] - q[2]), q[3], r.t]);
+        var gd = pxGear(f.d, f.h, f.n) || 1;
+        sn.p.push([r.o.e / gd, q[0], q[1], r.t]);
+        sn.e.push([r.o.p / gd, Math.max(0, q[3] - q[2]), q[3], r.t]);
         var s = Array.isArray(f.s) ? f.s : [0, 0, 0, 0];
         var skd = { L: q[0], dot: Math.round(s[0] * (q[1] + 4) / 100), focus: Math.round(s[1] * (q[1] + 4) / 100), stunT: q[0], stun: Math.round(s[2] * (q[1] + 4) / 100), blkT: q[2], blk: Math.round(s[3] * (q[2] + 4) / 100) };
         sn.skl.push([r.t, skd]);
@@ -486,10 +580,9 @@
       if (!p.snaps.length) return;
       p.snaps.sort(function (x, y) { return x.t1 - y.t1; });
       var sq = p.snaps.filter(function (x) { return !x.duel; }), last = (sq.length ? sq : p.snaps)[(sq.length ? sq : p.snaps).length - 1];
-      var pL = pxFit(cat('p', [last])), eL = pxFit(cat('e', [last])), mixed = 0;
-      var useLast = !!(pL && pL.info >= 6 && eL && eL.info >= 6);
-      var used = useLast ? [last] : p.snaps;
-      if (!useLast && p.snaps.length > 1) mixed = 1;
+      // Shares of power + hull stay comparable across growth, so every snapshot is
+      // used (a hidden reallocation is still caught by pxSplit below).
+      var used = p.snaps, mixed = 0;
       // A hidden change inside the fights used (pxSplit).
       var oP = cat('p', used), oE = cat('e', used), oK = cat('skl', p.snaps);
       cards.push({ u: u, p: p, last: last, mixed: mixed, oP: oP, oE: oE, oK: oK, chg: ownNames[u] ? null : pxSplit(oP, oE, oK) });
@@ -505,12 +598,14 @@
         oP = oP.filter(function (o) { return o[3] >= chg.t; }); oE = oE.filter(function (o) { return o[3] >= chg.t; });
         oK = oK.filter(function (x) { return x[0] >= chg.t; });
       }
-      var pp = pxFit(oP), ee = pxFit(oE);
+      var GL = pxGear(last.d, last.h, last.n) || 1, shp = pxShape(last.d, last.h, last.n);
+      var pp = pxFit(oP, [shp.p, shp.W / 2, shp.W]), ee = pxFit(oE, [shp.e, shp.W / 2, shp.W]);
       var skk = {}; oK.forEach(function (x) { pxSumSk(skk, x[1]); });
       var sk = skk.L || skk.blkT ? pxSkills({ L: skk.L || 0, dot: skk.dot || 0, focus: skk.focus || 0, stunT: skk.stunT || 0, stun: skk.stun || 0, blkT: skk.blkT || 0, blk: skk.blk || 0 }) : null;
       var cl = last.cl;
       if (!cl && last.c) cl = last.c.map(function (x) { return [x[0], x[1], x[2]]; });
-      function r3(f) { return f ? [Math.round(f.v), Math.round(f.se * 1000) / 1000, f.n] : null; }
+      // [value now (share x current power + hull), doubt (log scale), real swings, share]
+      function r3(f) { return f ? [Math.round(f.v * GL), Math.round(f.se * 1000) / 1000, f.n, Math.round(f.v * 10000) / 10000] : null; }
       out.push({ bt: chg ? Math.max(chg.t, last.t0) : last.t0, bl: last.t1, chg: chg ? chg.t : 0, chgw: chg ? chg.what : '', ours: c.ours ? c.chg.t : 0, name: u, sq: p.sq, g: p.g || 0, own: ownNames[u] || p.sq === own ? 1 : 0, t: p.t, nb: p.nb, nd: p.nd, snaps: p.snaps.length, mixed: c.mixed,
         d: last.d, h: last.h, n: last.n, cl: cl || [[0, 0, 0]], P: r3(pp), E: r3(ee), sk: sk ? sk.s : null, skc: sk ? sk.conf : 0, skn: sk ? sk.n : 0 });
     });
@@ -530,9 +625,11 @@
   // meta split (15% of the total next to 35% power) with very wide doubt.
   function pxRecord(card, myP, myE, k) {
     var N = card.n || 1, pow = card.d / N, hull = card.h / (7 * N);
-    var guess = Math.max(20, (pow + hull) / 2 * 15 / 35);
+    // No estimate at all (an old share file): the gear-based first guess (1.11.0;
+    // was 15/35 of the mean of power and hull, half the real value).
+    var shp = pxShape(card.d, card.h, N), G = pow + hull;
     function q(f, ref, kind) {
-      var v = f ? f[0] : guess, se = f ? Math.max(0.02, f[1]) : 0.6;
+      var v = f ? (f[3] ? f[3] * G : f[0]) : Math.max(20, (kind === 'p' ? shp.p : shp.e) * G), se = f ? Math.max(0.02, f[1]) : 0.6;
       var p = kind === 'p' ? v / (v + ref) : ref / (ref + v), n = Math.max(4, Math.round(1 / (se * se * p * (1 - p))));
       return [Math.round(p * n), n, v];
     }
@@ -560,8 +657,19 @@
      own time, so the newest value of each wins whatever order they come in.
      ============================================================ */
 
-  var DIR_RE = /\/api\/(rankings\/player\/[A-Za-z0-9_]+|player\/publicprofile\/[^?#]+|squadrons\/all)(\?|$)/;
+  var DIR_RE = /\/api\/(rankings\/player\/(?!currentrank\/)[^/?#]+|player\/publicprofile\/[^?#]+|squadrons\/all)(\?|$)/;
   function dirNum(v) { var n = Number(v); return isFinite(n) ? n : null; }
+  // A time from the game as ms: it sends unix seconds (its own code does moment.unix(date)
+  // and estimatedArrival * 1e3); ISO text and ms are taken as they are.
+  function dirMs(v) {
+    if (v === null || v === undefined || v === '') return null;
+    var n = Number(v);
+    if (isFinite(n)) return n > 0 && n < 1e11 ? n * 1000 : (n >= 1e11 ? n : null);
+    var p = Date.parse(v);
+    return isFinite(p) ? p : null;
+  }
+  // A short stable hash, for ids built from several fields.
+  function dirHash(s) { var h = 2166136261; s = String(s); for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h.toString(36); }
   function dirName(v) {
     if (typeof v === 'string') return v.trim().slice(0, 60) || null;
     if (v && typeof v === 'object') return dirName(v.username || v.name || null);
@@ -570,7 +678,7 @@
   function dirList(b) {
     if (Array.isArray(b)) return b;
     if (!b || typeof b !== 'object') return [];
-    var ks = ['results', 'rankings', 'squadrons', 'rows', 'data', 'items', 'docs'];
+    var ks = ['squadronList', 'results', 'rankings', 'squadrons', 'rows', 'data', 'items', 'docs'];
     for (var i = 0; i < ks.length; i++) if (Array.isArray(b[ks[i]])) return b[ks[i]];
     return [];
   }
@@ -583,42 +691,97 @@
     function add(k, id, f) {
       if (!id) return;
       var e = { k: k, id: id, t: t, f: {} }, n = 0;
-      Object.keys(f).forEach(function (x) { if (f[x] !== null && f[x] !== undefined && f[x] !== '') { e.f[x] = [f[x], t]; n++; } });
+      Object.keys(f).forEach(function (x) { if (f[x] !== null && f[x] !== undefined && (f[x] !== '' || x === 'sq')) { e.f[x] = [f[x], t]; n++; } });
       out.push(e);
     }
-    if ((m = /\/rankings\/player\/([A-Za-z0-9_]+)/.exec(url))) {
-      var typ = m[1], so = /[?&]squadronOnly=true/.test(url);
-      if (!so && dirNum(body.totalResults) !== null) add('n', typ, { n: dirNum(body.totalResults) });
+    if ((m = /\/rankings\/player\/([^/?#]+)/.exec(url)) && !/\/rankings\/player\/currentrank\//.test(url)) {
+      var typ = m[1], so = /[?&]squadronOnly=true/.test(url), fl = /[?&]filter=([^&#]+)/.exec(url);
+      try { typ = decodeURIComponent(typ); } catch (e) {}
+      // The ranking's size, only for the whole table (a search or the squadron toggle counts matches).
+      if (!so && !fl && dirNum(body.totalResults) !== null) add('n', typ, { n: dirNum(body.totalResults) });
+      var field = DIR_RANK[typ];
       dirList(body).forEach(function (r) {
         if (!r) return;
         var nm = dirName(r.user || r.username), v = r.value && typeof r.value === 'object' ? dirNum(r.value.magnitude1) : dirNum(r.value), f = { sq: dirName(r.squadron) };
-        if (typ === 'pvpArenaElo') { f.elo = v; f.rk = so ? null : dirNum(r.rank); }
-        else if (typ === 'clonesCount') f.cl = v;
-        else if (typ === 'battling') f.lv = v;
+        if (typ === 'pvpArenaElo') { f.elo = v; f.rk = so || fl ? null : dirNum(r.rank); }
+        else if (field) f[field] = v;
         add('p', nm, f);
       });
     } else if ((m = /\/player\/publicprofile\/([^?#]+)/.exec(url))) {
-      var p = body.user && typeof body.user === 'object' && !body.username ? body.user : body;
+      // The game reads the profile from body.data (UserProfilePage: C.value = e.data).
+      var p = body.data && typeof body.data === 'object' && !Array.isArray(body.data) ? body.data : (body.user && typeof body.user === 'object' && !body.username ? body.user : body);
       var nm2 = dirName(p.username) || (function () { try { return dirName(decodeURIComponent(m[1])); } catch (e) { return null; } })();
       var sq = p.squadron && typeof p.squadron === 'object' ? p.squadron : null, rks = Array.isArray(p.rankings) ? p.rankings : [];
       var er = rks.filter(function (x) { return x && x.ranking === 'pvpArenaElo'; })[0];
+      var vel = (Array.isArray(p.pets) ? p.pets : []).filter(function (x) { return x && /^velari$/i.test(String(x.name || '')); })[0];
+      var seen = dirMs(p.lastSeen);
       add('p', nm2, {
         sq: sq ? dirName(sq.name) : (p.squadron === null ? '' : dirName(p.squadron)),
         cl: Array.isArray(p.clones) ? p.clones.length : dirNum(p.clones),
-        lv: p.levels ? dirNum(p.levels.battling_level) : null,
+        lv: p.levels ? dirNum(p.levels.battling_level !== undefined ? p.levels.battling_level : p.levels.battling) : null,
+        cr: p.levels ? dirNum(p.levels.crafting_level !== undefined ? p.levels.crafting_level : p.levels.crafting) : null,
+        vel: vel ? dirNum(vel.level) : null,
+        seen: seen && seen > 1e12 ? seen : null,
+        // the profile page shows "Banned" when active is false; true clears it
+        ban: p.active === false ? 1 : (p.active === true ? 0 : null),
         rk: er ? dirNum(er.rank) : null,
         elo: er ? dirNum(er.magnitude1 !== undefined ? er.magnitude1 : er.magnitude) : null
       });
       if (sq && dirName(sq.name)) add('s', dirName(sq.name), { n: Array.isArray(sq.members) ? sq.members.length : dirNum(sq.members), lead: dirName(sq.leader) });
     } else if (/\/squadrons\/all/.test(url)) {
+      // {squadronList: [{name, leader{username}, maxMembers, members[{username, status}]}]};
+      // a member with status false is shown in red by the game (inactive).
       dirList(body).forEach(function (q) {
         if (!q) return;
         var sn = dirName(q.name), ms = Array.isArray(q.members) ? q.members : null;
-        add('s', sn, { n: ms ? ms.length : dirNum(q.members !== undefined ? q.members : (q.membersCount !== undefined ? q.membersCount : q.memberCount)), lead: dirName(q.leader) });
-        if (ms) ms.forEach(function (x) { var u = dirName(x); if (u && sn) add('p', u, { sq: sn }); });
+        add('s', sn, { n: ms ? ms.length : dirNum(q.members !== undefined ? q.members : (q.membersCount !== undefined ? q.membersCount : q.memberCount)), lead: dirName(q.leader), max: dirNum(q.maxMembers) });
+        if (ms) ms.forEach(function (x) { var u = dirName(x); if (u && sn) add('p', u, { sq: sn, act: x && typeof x === 'object' && x.status !== undefined ? (x.status === false ? 0 : 1) : null }); });
       });
     }
     return out;
+  }
+  // Ranking types that fill a player field (RankingsPage, 2026-11-10 bundle).
+  var DIR_RANK = { clonesCount: 'cl', battling: 'lv', crafting: 'cr', velariLevel: 'vel', critical_chance: 'cc', critical_damage: 'cd', dual_shot: 'ds', badges: 'bdg', battlesWon: 'bw', battlesLost: 'bl' };
+  // The Arena opponents list (socket PvPArena.getOpponents): Elo, record, level, clones.
+  function pxDirOpp(list, t) {
+    var out = [];
+    (Array.isArray(list) ? list : []).forEach(function (o) {
+      if (!o) return;
+      var nm = dirName(o.username), a = o.pvp_arena || {}, f = {
+        elo: dirNum(a.elo), aw: dirNum(a.wins), al: dirNum(a.losses),
+        lv: o.levels ? dirNum(o.levels.battling_level) : null, cr: o.levels ? dirNum(o.levels.crafting_level) : null,
+        cl: Array.isArray(o.clones) ? o.clones.length : dirNum(o.clones)
+      }, e = { k: 'p', id: nm, t: t, f: {} };
+      if (!nm) return;
+      Object.keys(f).forEach(function (x) { if (f[x] !== null && f[x] !== undefined) e.f[x] = [f[x], t]; });
+      out.push(e);
+    });
+    return out;
+  }
+  // "X attacked you in the PvP Arena and won/lost. Your ELO is now N." (Notification
+  // push or the notification list): an Arena list row without the attacker's Elo.
+  function pxNotifRow(n, me) {
+    if (!n || !me) return null;
+    var key = String(n.messageKey || ''), won = /duel_won_body/.test(key), lost = /duel_lost_body/.test(key);
+    if (!won && !lost) return null;
+    var mp = n.messageParams || {}, a = dirName(mp.username), t = dirMs(n.date) || 0;
+    if (!a || !(t > 1.6e12)) return null;
+    // duel_won_body: the attacker lost, so the defender (we) won. The id: the notification's
+    // own _id, else a hash of everything that tells two notifications apart.
+    var id = n._id ? 'n|' + String(n._id).slice(0, 60) : 'n|' + dirHash([a, t, key, mp.elo, me].join('|'));
+    return { i: id, t: t, a: a, d: me, ae: 0, de: dirNum(mp.elo) || 0, dl: 0, w: won ? 'd' : 'a', src: 'n' };
+  }
+  // The battlefield map made small: [x, y, squadron, group, defenders, power, status,
+  // attacking squadron, attacking group, arrival ms]. power = log10 of the holders' roster
+  // power score (from the REST answer's threat; a socket push has none).
+  function pxMap(map, threat, t) {
+    var tiles = map && Array.isArray(map.tiles) ? map.tiles : [];
+    threat = threat || {};
+    return { t: t || Date.now(), tiles: tiles.map(function (z) {
+      var c = z.coordinates || {}, o = z.occupiedBy || {}, s = o.squadronId || {}, ai = z.attackInfo || {}, th = threat[z._id] || {};
+      var as = ai.attackersquadronId && typeof ai.attackersquadronId === 'object' ? ai.attackersquadronId.name : ai.attackersquadronId;
+      return [dirNum(c.x), dirNum(c.y), dirName(s.name) || null, dirNum(o.groupNumber), dirNum(th.defenders), dirNum(th.power), z.status || null, as ? String(as).slice(0, 60) : null, dirNum(ai.attackerGroupNumber), dirMs(ai.estimatedArrival)];
+    }) };
   }
   // Adds entries to D (a plain object); returns how many fields changed.
   function dirMerge(D, es) {
@@ -932,7 +1095,7 @@
   function plPayload() {
     var st = recState() || S.storeState, me = st && st.UserStore && st.UserStore.username, pv = st ? readPvp(st) : null;
     var get = function (s) { return arcTx(s, 'readonly', function (os) { return os.getAll(); }).catch(function () { return []; }); };
-    return Promise.all([get('squad'), get('duel'), get('roster'), get('duelList'), get('dir')]).then(function (all) {
+    return Promise.all([get('squad'), get('duel'), get('roster'), get('duelList'), get('dir'), get('map')]).then(function (all) {
       var mine = function (x) { return x && x.realm === REALM; };
       var squad = all[0].filter(mine), duels = all[1].filter(mine), roster = all[2].filter(mine);
       // The page's own state right now: the member list, and Squadron Groups
@@ -943,6 +1106,7 @@
       // The Arena list rows (who won, both Elo; no log), made small.
       var dlist = all[3].filter(mine).map(function (x) {
         var r = x.row;
+        if (r && r.src === 'n' && r.i && r.a && r.d) return r;   // from an Arena notification (1.5.0)
         if (!r || !r._id || !r.attackerName || !r.defenderName) return null;
         var w = r.winner === r.attackerName || (r.attacker && r.winner === r.attacker) ? 'a' : (r.winner === r.defenderName || (r.defender && r.winner === r.defender) ? 'd' : '');
         return { i: String(r._id), t: (Number(r.created) || 0) * 1000, a: String(r.attackerName), d: String(r.defenderName), ae: Number(r.attackerElo) || 0, de: Number(r.defenderElo) || 0, dl: Number(r.eloDelta) || 0, w: w };
@@ -962,14 +1126,16 @@
       var recs = Object.keys(seen).map(function (k) { return seen[k]; }).sort(function (x, y) { return x.t - y.t; });
       // Rankings, profiles, squadron list: one small entry per player and squadron.
       var D = {};
-      all[4].filter(mine).forEach(function (q) { dirMerge(D, pxDir(q.url, q.body, q.t)); });
+      all[4].filter(mine).forEach(function (q) { dirMerge(D, arcDirOf(q)); });
       var dir = dirEntries(D);
       var t = pv ? pvTotals(pv) : null;
       var x = pxExtract({ squad: squad, roster: roster }, me, recs, t ? { p: t.precision, e: t.evasion } : null);
       // raw: the battles and rosters themselves, so the page can add them up
       // with the squadron file and other imports (page 1.4.9 on).
       return { app: 'PvP Meta', v: 1, ver: scriptVersion(), realm: REALM, made: Date.now(), root: st ? plRoot(st) : null, duels: recs, x: x,
-        raw: { squad: squad.map(function (q) { return { realm: q.realm, saved: q.saved, battle: q.battle }; }), roster: roster.map(function (r) { return { t: r.t, body: r.body }; }), dlist: dlist, members: mem, dir: dir } };
+        raw: { squad: squad.map(function (q) { return { realm: q.realm, saved: q.saved, battle: q.battle }; }), roster: roster.map(function (r) { return { t: r.t, body: r.body }; }), dlist: dlist, members: mem, dir: dir,
+          // The map, made small (about 2 KB a snapshot): zone holders, their strength, attacks.
+          map: all[5].filter(mine).sort(function (p, q) { return p.t - q.t; }).slice(-60).map(function (x) { var b = null; try { b = JSON.parse(x.body); } catch (e) {} return b && b.map ? pxMap(b.map, b.threat, x.t) : null; }).filter(Boolean) } };
     });
   }
 
@@ -1652,8 +1818,6 @@
     return Math.max(1, Math.ceil(n * (se / target) * (se / target)) - n);
   }
 
-  function pvPct(score) { return Math.max(0, Math.min(100, Math.round(score))); }
-
   function pvCompositions(n) {
     var out = [];
     (function rec(start, cur) {
@@ -2214,29 +2378,39 @@
   }
 
   /* ============================================================
-     BATTLE ARCHIVE (1.1.0)
+     BATTLE ARCHIVE (1.1.0; live capture 1.5.0)
 
      Keeps what the game sends this page about PvP, as the player browses:
      squadron battles with their full logs and both groups' member data
      (Battle Log > Squadron), the arena duel list and every duel opened with
-     View battle, the squadron's groups (Squadron Groups) and the map. It
-     only listens to answers the game itself asked for and received: it sends
-     nothing, clicks nothing and pages through nothing (the game's rules
-     allow scripts for information only). Kept whole, in this browser's
-     IndexedDB, for the squadron simulator and group builder that come next.
+     View battle, the squadron's groups (Squadron Groups), the map, Rankings
+     pages, player profiles and the squadron list. From 1.5.0 it also listens
+     to the game's own socket messages on the game's event bus (opponent
+     lists, map changes, "X attacked you in the Arena", duels): the same
+     messages the game hands to its own screens. It only listens to answers
+     and messages the game itself received: it sends nothing, clicks nothing
+     and pages through nothing (the game's rules allow scripts for
+     information only). Kept in this browser's IndexedDB.
      ============================================================ */
 
-  var ARC_RE = /\/api\/(squadrons\/(battlelog|groups|all)|battlefield\/(arenaduels|map)|rankings\/player\/[A-Za-z0-9_]+|player\/publicprofile\/[^?#]+)(\?|$)/;
+  var ARC_RE = /\/api\/(squadrons\/(battlelog|groups|all)|battlefield\/(arenaduels|map)|rankings\/player\/(?!currentrank\/)[^/?#]+|player\/publicprofile\/[^?#]+)(\?|$)/;
+  // A random token for this page load: only messages from our own hook carry it.
+  var ARC_TOK = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
   // Runs in the game's own page, before its app starts: wraps the browser's
   // XMLHttpRequest and fetch so that, when the game's request for one of the
-  // four lists comes back, a copy of the answer is handed to this script.
-  function arcHook() {
+  // lists above comes back, a copy of the answer is handed to this script; and,
+  // once the game's app is up, listens on its event bus ($eventBus,
+  // 'socketMessage') for the few PvP messages, plus a census of every message
+  // name and its field names (no values).
+  function arcHook(tok) {
     if (window.__sopvpHook) return;
     window.__sopvpHook = 1;
-    var RE = /\/api\/(squadrons\/(battlelog|groups|all)|battlefield\/(arenaduels|map)|rankings\/player\/[A-Za-z0-9_]+|player\/publicprofile\/[^?#]+)(\?|$)/;
+    var RE = /\/api\/(squadrons\/(battlelog|groups|all)|battlefield\/(arenaduels|map)|rankings\/player\/(?!currentrank\/)[^/?#]+|player\/publicprofile\/[^?#]+)(\?|$)/;
+    var BUS = /^(SocketMaster\.sendUpdate\/(systemBattleLog|systemAttackAnnouncement)|Battlefield\.mapUpdate|PvPArena\.(getOpponents|attackPlayer|getDuel|getArenaData)|Notification\.newNotification)$/;
     function abs(u) { try { return new URL(String((u && u.href) || u), location.href).href; } catch (e) { return String(u); } }
-    function hand(url, text) { try { window.postMessage({ __sopvp: 1, url: String(url), text: text }, location.origin); } catch (e) {} }
+    function post(o) { try { o.__sopvp = 1; o.tok = tok; window.postMessage(o, location.origin); } catch (e) {} }
+    function hand(url, text) { post({ url: String(url), text: text }); }
     var XP = XMLHttpRequest.prototype, oOpen = XP.open, oSend = XP.send;
     XP.open = function (m, u) { try { this.__sopvpU = abs(u); } catch (e) {} return oOpen.apply(this, arguments); };
     XP.send = function () {
@@ -2261,27 +2435,63 @@
       } catch (e) {}
       return p;
     };
+    // The game's event bus: every decoded socket message is emitted on it.
+    var cen = {}, cenDirty = false;
+    function onMsg(m) {
+      try {
+        if (!m || typeof m !== 'object') return;
+        var v = m.value !== undefined ? m.value : m.data;
+        var name = String(m.classname) + '.' + String(m.method) + (m.method === 'sendUpdate' && v && typeof v === 'object' && v.type ? '/' + v.type : '');
+        var c = cen[name] || (cen[name] = { n: 0, k: {} });
+        c.n++;
+        if (!cenDirty) { cenDirty = true; setTimeout(flush, 2000); }
+        if (v && typeof v === 'object') Object.keys(v).slice(0, 40).forEach(function (k) { c.k[k] = 1; });
+        if (BUS.test(name)) post({ bus: name, t: Date.now(), v: JSON.parse(JSON.stringify(v === undefined ? null : v)) });
+      } catch (e) {}   // never let an error reach the game's own handlers
+    }
+    function busTry() {
+      try {
+        var el = document.querySelector('#q-app'), app = el && el.__vue_app__;
+        var gp = app && app.config && app.config.globalProperties, bus = gp && gp.$eventBus;
+        if (!bus || typeof bus.$on !== 'function') return false;
+        if (!bus.__sopvp) { bus.__sopvp = 1; bus.$on('socketMessage', onMsg); post({ busOn: 1 }); }
+        return true;
+      } catch (e) { return false; }
+    }
+    var tries = 0, bt = setInterval(function () { if (busTry() || ++tries > 600) clearInterval(bt); }, 1000);
+    function flush() { if (cenDirty) { cenDirty = false; post({ census: JSON.parse(JSON.stringify(cen)) }); } }
+    post({ hello: 1 });
   }
   try {
     var hookEl = document.createElement('script');
-    hookEl.textContent = '(' + String(arcHook) + ')();';
+    hookEl.textContent = '(' + String(arcHook) + ')(' + JSON.stringify(ARC_TOK) + ');';
     (document.head || document.documentElement).appendChild(hookEl);
     hookEl.remove();
   } catch (e) { setErr('the battle archive could not start: ' + ((e && e.message) || e)); }
 
   var REALM = /^steam\./i.test(location.hostname) ? 'steam' : 'web';
-  var ARC = { db: null, n: { squad: 0, duel: 0, duelList: 0, roster: 0, map: 0, dir: 0 }, last: 0, bytes: 0, err: null, np: 0 };
-  // dir (1.4.0): Rankings pages, player profiles and the squadron list, the
-  // newest answer per address (see pxDir).
-  var ARC_STORES = ['squad', 'duel', 'duelList', 'roster', 'map', 'dir'];
+  var ARC = { db: null, n: { squad: 0, duel: 0, duelList: 0, roster: 0, map: 0, dir: 0, push: 0, events: 0 }, last: 0, bytes: 0, err: null, np: 0, D: null, hook: false, bus: false, census: null };
+  // dir (1.4.0): Rankings pages, player profiles, the squadron list and (1.5.0) Arena
+  // opponent lists, the newest answer per address. push / events (1.5.0): battles and
+  // attack announcements pushed by the game's socket, kept here only until it is known
+  // whether the game sends them for battlefield fights (see the census).
+  var ARC_STORES = ['squad', 'duel', 'duelList', 'roster', 'map', 'dir', 'push', 'events'];
+  setTimeout(function () { if (!ARC.hook && S.inputs.archive !== false) { ARC.err = 'the archive hook is not running on this page (blocked?): nothing new is being kept'; } }, 6000);
 
   function arcOpen() {
     if (ARC.db) return Promise.resolve(ARC.db);
     return new Promise(function (ok, no) {
       var rq;
-      try { rq = indexedDB.open('sopvp-archive', 2); } catch (e) { no(e); return; }
+      try { rq = indexedDB.open('sopvp-archive', 3); } catch (e) { no(e); return; }
       rq.onupgradeneeded = function () { var d = rq.result; ARC_STORES.forEach(function (s) { if (!d.objectStoreNames.contains(s)) d.createObjectStore(s); }); };
-      rq.onsuccess = function () { ARC.db = rq.result; ok(ARC.db); };
+      // An older copy of the script in another game tab holds the database open.
+      rq.onblocked = function () { no(new Error('the archive is open in another game tab with an older PvP Meta: close or reload that tab')); };
+      rq.onsuccess = function () {
+        ARC.db = rq.result;
+        ARC.db.onversionchange = function () { try { ARC.db.close(); } catch (e) {} ARC.db = null; };
+        ARC.db.onclose = function () { ARC.db = null; };
+        ok(ARC.db);
+      };
       rq.onerror = function () { no(rq.error); };
     });
   }
@@ -2300,22 +2510,15 @@
     if (!items.length) return Promise.resolve(0);
     return arcOpen().then(function (d) {
       return new Promise(function (ok, no) {
-        var tx = d.transaction(store, 'readwrite'), os = tx.objectStore(store), added = 0;
+        var tx = d.transaction(store, 'readwrite'), os = tx.objectStore(store), added = 0, fresh = [];
         items.forEach(function (it) {
           var g = os.getKey(it.k);
-          g.onsuccess = function () { if (g.result === undefined) { os.put(it.v, it.k); added++; } };
+          g.onsuccess = function () { if (g.result === undefined) { os.put(it.v, it.k); added++; fresh.push(it.v); } };
         });
-        tx.oncomplete = function () { ok(added); };
+        // Handed on only once saved.
+        tx.oncomplete = function () { fresh.forEach(function (v) { try { liveAdd(store, v); } catch (e) {} }); ok(added); };
         tx.onerror = function () { no(tx.error); };
       });
-    });
-  }
-  // How many players the kept Rankings pages and profiles name.
-  function arcDirCount() {
-    return arcTx('dir', 'readonly', function (os) { return os.getAll(); }).then(function (all) {
-      var D = {};
-      all.forEach(function (x) { if (x && x.realm === REALM) dirMerge(D, pxDir(x.url, x.body, x.t)); });
-      ARC.np = dirEntries(D).filter(function (e) { return e.k === 'p'; }).length;
     });
   }
   function arcCount() {
@@ -2324,11 +2527,31 @@
       try { if (navigator.storage && navigator.storage.estimate) return navigator.storage.estimate().then(function (e) { ARC.bytes = e.usage || 0; }); } catch (e) {}
     });
   }
+  // A roster's PvP part only (group order, PvP stats, gear, clones, crafting level,
+  // Velari, active): the game re-sends the roster on every map change with new XP
+  // counters, which must not make a new snapshot.
+  function arcRosterKey(text) {
+    try {
+      var b = JSON.parse(text), q = Array.isArray(b.squad) ? b.squad[0] : b;
+      return JSON.stringify(['group1', 'group2', 'group3', 'available'].map(function (g) {
+        return (q[g] || []).map(function (m) {
+          return m ? [m.username, m.active, m.pvpstats && [m.pvpstats.power, m.pvpstats.precision, m.pvpstats.evasion, m.pvpstats.hull],
+            (m.pvp_gear || []).map(function (x) { return [x.name, x.stat, x.skill, x.statLevel, x.statTier]; }),
+            (m.clones || []).map(function (c) { return [c.critical_chance, c.critical_damage, c.dual_shot]; }),
+            m.levels && m.levels.crafting_level, m.velari_pet && [m.velari_pet.level, m.velari_pet.equipped]] : null;
+        });
+      }));
+    } catch (e) { return text; }
+  }
   // A snapshot (roster, map) is kept only when it differs from the last one.
   var arcLastSnap = {};
-  function arcSnap(store, text, keep) {
-    if (arcLastSnap[store] === text) return Promise.resolve(0);
-    arcLastSnap[store] = text;
+  function arcSnap(store, text, keep, keyOf) {
+    var key = keyOf ? keyOf(text) : text;
+    if (arcLastSnap[store] === key) return Promise.resolve(0);
+    // Marked at once (a second identical answer may come before the save ends) and
+    // unmarked if the save fails, so the same snapshot is tried again next time.
+    var prev = arcLastSnap[store];
+    arcLastSnap[store] = key;
     var k = REALM + '|' + Date.now();
     return arcPutNew(store, [{ k: k, v: { t: Date.now(), realm: REALM, body: text } }]).then(function (n) {
       if (!keep) return n;
@@ -2336,6 +2559,27 @@
         var c = os.getAllKeys();
         c.onsuccess = function () { var ks = c.result.filter(function (x) { return String(x).indexOf(REALM + '|') === 0; }).sort(); ks.slice(0, Math.max(0, ks.length - keep)).forEach(function (x) { os.delete(x); }); };
       }).then(function () { return n; });
+    }, function (e) { if (arcLastSnap[store] === key) arcLastSnap[store] = prev; throw e; });
+  }
+  // The directory (Rankings, profiles, squadron list, opponents), merged once at
+  // start and then one answer at a time (was: every page re-read on each new one).
+  function arcDirOf(x) {
+    if (!x || x.realm !== REALM) return [];
+    if (Array.isArray(x.entries)) return x.entries;
+    return pxDir(x.url, x.body, x.t);
+  }
+  function arcDirCount() {
+    return arcTx('dir', 'readonly', function (os) { return os.getAll(); }).then(function (all) {
+      var D = {};
+      all.forEach(function (x) { dirMerge(D, arcDirOf(x)); });
+      ARC.D = D; arcDirN();
+    });
+  }
+  function arcDirN() { ARC.np = dirEntries(ARC.D).filter(function (e) { return e.k === 'p'; }).length; }
+  function arcDirPut(key, v) {
+    return arcTx('dir', 'readwrite', function (os) { os.put(v, key); }).then(function () {   // liveAdd below: after the save
+      if (ARC.D) { dirMerge(ARC.D, arcDirOf(v)); arcDirN(); }
+      liveAdd('dir', v);
     });
   }
 
@@ -2345,27 +2589,77 @@
     var job = null;
     if (/squadrons\/battlelog/.test(url)) {
       var bs = (body && Array.isArray(body.battles)) ? body.battles : [];
-      job = arcPutNew('squad', bs.filter(function (b) { return b && b._id && Array.isArray(b.logs); }).map(function (b) {
+      // Only finished battles: a half-written one must never block the full one.
+      job = arcPutNew('squad', bs.filter(function (b) {
+        if (!b || !b._id || !Array.isArray(b.logs) || !b.logs.length) return false;
+        var lastL = b.logs[b.logs.length - 1];
+        return b.status === 'finished' || (lastL && lastL.action === 'won');
+      }).map(function (b) {
         return { k: REALM + '|' + b._id, v: { realm: REALM, saved: Date.now(), battle: b } };
       }));
     } else if (/battlefield\/arenaduels/.test(url)) {
       var rs = (body && Array.isArray(body.results)) ? body.results : [];
       job = arcPutNew('duelList', rs.filter(function (r) { return r && r._id; }).map(function (r) { return { k: REALM + '|' + r._id, v: { realm: REALM, saved: Date.now(), row: r } }; }));
-    } else if (/squadrons\/groups/.test(url)) job = arcSnap('roster', text, 0);
+    } else if (/squadrons\/groups/.test(url)) job = arcSnap('roster', text, 300, arcRosterKey);
     else if (/battlefield\/map/.test(url)) job = arcSnap('map', text, 100);
     else if (DIR_RE.test(url)) {
       var path = url.replace(/^https?:\/\/[^/]+/, '');
-      job = arcTx('dir', 'readwrite', function (os) { os.put({ t: Date.now(), realm: REALM, url: path, body: text }, REALM + '|' + path); }).then(function () { return arcDirCount(); });
+      job = arcDirPut(REALM + '|' + path, { t: Date.now(), realm: REALM, url: path, body: text });
     }
     if (!job) return;
+    arcDone(job);
+  }
+  function arcDone(job) {
     job.then(function () { ARC.last = Date.now(); ARC.err = null; return arcCount(); })
       .then(function () { if (panel.style.display !== 'none' && view === 'set') render(); }, function (e) { ARC.err = String((e && e.message) || e); });
   }
 
+  // A message from the game's event bus (via our hook).
+  function busTake(name, v, t) {
+    if (v === false || v === null || v === undefined) return;
+    var st0 = recState() || S.storeState, me = (st0 && st0.UserStore && st0.UserStore.username) || null, job = null;
+    if (name === 'Battlefield.mapUpdate' && v.map) {
+      job = arcSnap('map', JSON.stringify({ map: v.map, push: 1 }), 100);
+    } else if (name === 'PvPArena.getOpponents' && Array.isArray(v.opponents)) {
+      job = arcDirPut(REALM + '|bus:opp|' + t, { t: t, realm: REALM, url: 'bus:opponents', band: v.band, entries: pxDirOpp(v.opponents, t) });
+    } else if ((name === 'PvPArena.attackPlayer' || name === 'PvPArena.getDuel') && v.duel && v.duel._id && Array.isArray(v.duel.logs) && v.duel.logs.length && (v.duel.winner || v.duel.logs[v.duel.logs.length - 1].action === 'won')) {
+      job = arcPutNew('duel', [{ k: REALM + '|' + v.duel._id, v: { realm: REALM, saved: t, duel: v.duel } }]);
+    } else if (name === 'Notification.newNotification' && v.notif) {
+      job = arcNotif([v.notif], me);
+    } else if (name === 'SocketMaster.sendUpdate/systemBattleLog' && v.data) {
+      job = arcPutNew('push', [{ k: REALM + '|' + (v.data.fightId || t), v: { realm: REALM, saved: t, data: v.data } }]);
+    } else if (name === 'SocketMaster.sendUpdate/systemAttackAnnouncement' && v.data) {
+      job = arcPutNew('events', [{ k: REALM + '|' + (v.data.battleId || t), v: { realm: REALM, saved: t, data: v.data } }]);
+    }
+    if (job) arcDone(job);
+  }
+  // "X attacked you in the PvP Arena and won/lost": an Arena list row (no attacker Elo).
+  function arcNotif(list, me) {
+    var rows = [];
+    (list || []).forEach(function (n) { var r = pxNotifRow(n, me); if (r) rows.push({ k: REALM + '|' + r.i, v: { realm: REALM, saved: Date.now(), row: r } }); });
+    return arcPutNew('duelList', rows);
+  }
+  // The notification list (sent at login): the same rows, once a minute.
+  function arcNotifTick() {
+    if (S.inputs.archive === false) return;
+    var st = recState(), N = st && st.NotificationStore, me = st && st.UserStore && st.UserStore.username;
+    var list; try { list = N && N.notifications; } catch (e) { return; }
+    if (!Array.isArray(list) || !list.length || !me) return;
+    try { list = JSON.parse(JSON.stringify(list.slice(-200))); } catch (e) { return; }
+    arcNotif(list, me).then(function (n) { if (n) { ARC.last = Date.now(); return arcCount(); } }, function () {});
+  }
+
   window.addEventListener('message', function (e) {
     var d = e && e.data;
-    if (!d || d.__sopvp !== 1 || typeof d.url !== 'string' || typeof d.text !== 'string' || !ARC_RE.test(d.url)) return;
+    // Only our own hook in this very page: same window, same origin, this load's token.
+    var pageWin = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+    if (!d || d.__sopvp !== 1 || d.tok !== ARC_TOK || e.origin !== location.origin || (e.source !== window && e.source !== pageWin)) return;
+    if (d.hello) { ARC.hook = true; if (/hook is not running/.test(ARC.err || '')) ARC.err = null; return; }
+    if (d.busOn) { ARC.bus = true; return; }
+    if (d.census) { ARC.census = d.census; return; }
     if (S.inputs.archive === false) return;
+    if (typeof d.bus === 'string') { try { busTake(d.bus, d.v, +d.t || Date.now()); } catch (er) { ARC.err = String((er && er.message) || er); } return; }
+    if (typeof d.url !== 'string' || typeof d.text !== 'string' || !ARC_RE.test(d.url)) return;
     arcTake(d.url, d.text);
   });
 
@@ -2382,6 +2676,49 @@
     try { copy = JSON.parse(JSON.stringify(d)); } catch (e) { return; }
     arcPutNew('duel', [{ k: REALM + '|' + d._id, v: { realm: REALM, saved: Date.now(), duel: copy } }])
       .then(function (n) { if (n) { ARC.last = Date.now(); return arcCount(); } }, function (e) { ARC.err = String((e && e.message) || e); });
+  }
+
+  /* ---- live hand-over to an open planner tab (1.5.0) ----
+     New items, once saved here, go into this tab's own outbox in the script manager's
+     storage (one outbox per game tab and realm, so two game tabs never overwrite each
+     other). The same script, running on the planner page, hands them to the page, which
+     saves them, shares them like any import (unless sharing is off there) and says which
+     it took. Nothing is sent to the game, and the script makes no network request. */
+  var LIVE_MAX = 3 * 1024 * 1024;
+  var LIVE_TAB = (function () { try { var v = sessionStorage.getItem('sopvp:tab'); if (!v) { v = Math.random().toString(36).slice(2, 10); sessionStorage.setItem('sopvp:tab', v); } return v; } catch (e) { return Math.random().toString(36).slice(2, 10); } })();
+  var LIVE_KEY = 'out:' + REALM + ':' + LIVE_TAB;
+  var liveBuf = [], liveTimer = null, liveSkipped = 0;
+  function liveBytes(o) { try { return new TextEncoder().encode(JSON.stringify(o)).length; } catch (e) { return JSON.stringify(o).length * 3; } }
+  function liveAdd(store, v) {
+    if (S.inputs.live !== true || typeof GM_setValue !== 'function') return;
+    var it = null;
+    if (store === 'squad' && v.battle) it = { kind: 'squad', x: { realm: v.realm, saved: v.saved, battle: v.battle } };
+    else if (store === 'duel' && v.duel) it = { kind: 'duel', x: { saved: v.saved, duel: v.duel } };
+    else if (store === 'duelList' && v.row) it = { kind: 'duelList', x: { row: v.row } };
+    else if (store === 'roster' && v.body) it = { kind: 'roster', x: { t: v.t, body: v.body } };
+    else if (store === 'dir') it = { kind: 'dir', x: arcDirOf(v) };
+    else if (store === 'map' && v.body) { var mb = null; try { mb = JSON.parse(v.body); } catch (e) {} if (mb && mb.map) it = { kind: 'map', x: pxMap(mb.map, mb.threat, v.t) }; }
+    if (!it) return;
+    liveBuf.push(it);
+    if (!liveTimer) liveTimer = setTimeout(liveFlush, 1500);
+  }
+  function liveFlush() {
+    liveTimer = null;
+    if (!liveBuf.length) return;
+    if (S.inputs.live !== true) { liveBuf = []; return; }   // switched off while waiting
+    var box = store.get(LIVE_KEY, null) || { seq: 0, items: [], realm: REALM }, ack = store.get(LIVE_KEY.replace('out:', 'ack:'), 0) || 0;
+    box.items = (box.items || []).filter(function (x) { return x.seq > ack; });
+    liveBuf.forEach(function (it) {
+      // One item too big for the outbox stays in the archive only (Open in planner still sends it).
+      if (liveBytes(it) > LIVE_MAX / 2) { liveSkipped++; return; }
+      box.seq++; it.seq = box.seq; it.realm = REALM; box.items.push(it);
+    });
+    liveBuf = [];
+    var size = liveBytes(box);
+    while (box.items.length && size > LIVE_MAX) { size -= liveBytes(box.items.shift()); liveSkipped++; }
+    box.realm = REALM; box.upd = Date.now();
+    store.set(LIVE_KEY, box);
+    store.set('wake', Date.now());   // tells a planner tab to look now
   }
 
   function arcDownload() {
@@ -2403,17 +2740,42 @@
     var h = sect('Battle archive');
     h += '<div class="tiles">' + tile('Squadron battles', grp(ARC.n.squad), 'full logs') + tile('Arena duels', grp(ARC.n.duel), grp(ARC.n.duelList) + ' in the list') +
       tile('Roster', ARC.n.roster ? String(ARC.n.roster) : '--', ARC.n.roster ? 'snapshots' : 'open Squadron Groups') + '</div>';
-    h += kvs([['Players named in Rankings and profiles', grp(ARC.np) + (ARC.n.dir ? ' (' + ARC.n.dir + ' pages)' : '')], ['Map snapshots', String(ARC.n.map)], ['Stored in this browser', ARC.bytes ? mbTxt(ARC.bytes) : '--'], ['Last saved', ARC.last ? whenTxt(ARC.last) : 'not this session']]);
+    h += kvs([['Players named in Rankings, profiles, squadron list and Arena opponents', grp(ARC.np) + (ARC.n.dir ? ' (' + ARC.n.dir + ' pages)' : '')], ['Map snapshots', String(ARC.n.map)],
+      ['Live game messages', ARC.bus ? 'listening' : (ARC.hook ? 'waiting for the game' : 'not running')], ['Battles / attacks pushed by the game', grp(ARC.n.push) + ' / ' + grp(ARC.n.events)],
+      ['Stored in this browser', ARC.bytes ? mbTxt(ARC.bytes) : '--'], ['Last saved', ARC.last ? whenTxt(ARC.last) : 'not this session']]);
     if (ARC.err) h += line('Archive error: ' + ARC.err, 'bad');
     h += line('Kept as you browse: Battlefield › Battle Log (squadron battles come with their full logs; set Records per page to 50 and click through the pages once to keep them all), Battle Log › Arena (the list of your duels: enough for opponents already seen in a squadron battle), View battle on an arena duel (its full log, for players never met in a squadron battle), Squadron Groups, the Map, Rankings (Arena ELO: every page you look at), player profiles you open and the squadron list. It only reads what the game already shows you: it sends nothing and clicks nothing.');
-    h += line('Kept whole in this browser (about 0.1 MB a squadron battle), for the player picker in the planner, squadron simulator and group builder. Nothing leaves your computer unless you download it or open the planner.', 'mu');
-    h += '<div class="row"><label class="c"><input type="checkbox" id="f_arc"' + (S.inputs.archive === false ? '' : ' checked') + '>Keep battles</label></div>';
+    h += line('Kept whole in this browser (about 0.1 MB a squadron battle). It leaves this game tab only to the planner page: when you click Open in planner, and (with the box below ticked) by itself whenever a planner tab is open. The planner then adds it to the shared store everyone uses (battles, rosters, arena results, map holders, player names with squadron, Elo, clones, crafting and Velari levels), unless sharing is switched off on the planner\'s Import tab. Battles and attack notices pushed by the game stay in this browser only for now.', 'mu');
+    h += '<div class="row"><label class="c"><input type="checkbox" id="f_arc"' + (S.inputs.archive === false ? '' : ' checked') + '>Keep battles</label>' +
+      '<label class="c"><input type="checkbox" id="f_live"' + (S.inputs.live === true ? ' checked' : '') + '>Hand new data to an open planner tab (live)</label></div>';
+    h += renderCensus();
     h += '<div class="row"><button class="act" id="b_arcdl">Download archive (.json)</button><button class="act" id="b_arcclr">Clear archive</button></div>';
-    h += line('Open in planner sends a small card per player (not the raw logs) to the web planner, where you can plan against one player or a whole squadron.', 'mu');
+    h += line('Open in planner sends your build, your duels, the kept battles, rosters, Arena list, map and directory to the web planner, where you can plan against one player or a whole squadron.', 'mu');
+    if (liveSkipped) h += line(liveSkipped + ' item(s) were too big for the live hand-over: use Open in planner to send them.', 'warn');
     return h + plRow();
   }
 
-  arcCount().then(arcDirCount).catch(function (e) { ARC.err = String((e && e.message) || e); });
+  // Which socket messages the game sent this session, with their field names (no
+  // values): answers the open questions (is a battlefield fight pushed? who gets map
+  // changes?) after one evening of normal play. Copy it to share.
+  function renderCensus() {
+    var c = ARC.census;
+    if (!c) return '';
+    var names = Object.keys(c).sort();
+    var txt = names.map(function (n) { return n + ' x' + c[n].n + ': ' + Object.keys(c[n].k).join(', '); }).join('\n');
+    return '<details class="more"><summary>Game messages seen this session (' + names.length + ')</summary><textarea id="f_census" readonly style="width:100%;height:140px;font-size:11px">' + esc(txt) + '</textarea></details>';
+  }
+
+  // The newest stored roster and map, so a page load does not store the same one again.
+  function arcSnapInit() {
+    return Promise.all(['roster', 'map'].map(function (st) {
+      return arcTx(st, 'readonly', function (os) { return os.getAll(); }).then(function (all) {
+        var mine = all.filter(function (x) { return x && x.realm === REALM; }).sort(function (p, q) { return p.t - q.t; }), last = mine[mine.length - 1];
+        if (last && arcLastSnap[st] === undefined) arcLastSnap[st] = st === 'roster' ? arcRosterKey(last.body) : last.body;
+      });
+    }));
+  }
+  arcCount().then(arcSnapInit).then(arcDirCount).catch(function (e) { ARC.err = String((e && e.message) || e); });
 
   /* ============================================================
      THE PANEL
@@ -2528,6 +2890,7 @@
     });
     on('#b_back', function () { view = 'pvp'; render(); });
     on('#f_arc', function () { S.inputs.archive = panel.querySelector('#f_arc').checked; saveInputs(); render(); }, 'change');
+    on('#f_live', function () { S.inputs.live = panel.querySelector('#f_live').checked; saveInputs(); render(); }, 'change');
     on('#b_plopen', plOpen);
     on('#b_arcdl', function () { arcDownload().catch(function (e) { ARC.err = 'download failed: ' + ((e && e.message) || e); render(); }); });
     on('#b_arcclr', function () {
@@ -2542,6 +2905,9 @@
     try { recTick(); } catch (e) { setErr('recording the duel failed: ' + ((e && e.message) || e)); }
     try { arcDuelTick(); } catch (e) { ARC.err = String((e && e.message) || e); }
   }, REC_WATCH_MS);
+  // Arena notifications already in the game's list (sent at login): once a minute.
+  setInterval(function () { try { arcNotifTick(); } catch (e) {} }, 60000);
+  setTimeout(function () { try { arcNotifTick(); } catch (e) {} }, 15000);
   // The build: every 10 s while the panel is open (Settings is left alone,
   // so a redraw does not throw away what is being typed).
   setInterval(function () {
