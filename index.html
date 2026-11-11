@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PvP Build Planner (beta)</title>
-<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.11.5">
+<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.12.0">
 </head>
 <body>
 <script>
 (function () {
   'use strict';
-  var PAGE_VER = "1.11.5";
+  var PAGE_VER = "1.12.0";
   var GRAB_SRC = "(function () {\nif (window.__sopvpGrab) { window.__sopvpGrab.show(); return; }\nvar PL = 'https://johnnyboyqc.github.io/stellar-odyssey-pvp-planner/', OR = 'https://johnnyboyqc.github.io';\nvar G = { squad: {}, roster: null, duels: {}, list: {}, box: null };\nvar RE = /\\/api\\/(squadrons\\/(battlelog|groups)|battlefield\\/arenaduels)(\\?|$)/;\nfunction abs(u) { try { return new URL(String((u && u.href) || u), location.href).href; } catch (e) { return String(u); } }\nfunction take(url, text) {\nvar b;\ntry { b = JSON.parse(text); } catch (e) { return; }\nif (/battlelog/.test(url)) (b && b.battles || []).forEach(function (x) { if (x && x._id && Array.isArray(x.logs)) G.squad[x._id] = x; });\nelse if (/arenaduels/.test(url)) (b && b.results || []).forEach(function (x) { if (x && x._id && x.attackerName && x.defenderName) G.list[x._id] = x; });\nelse G.roster = { t: Date.now(), body: text };\ndraw();\n}\nvar XP = XMLHttpRequest.prototype, oO = XP.open, oS = XP.send;\nXP.open = function (m, u) { try { this.__sopvpG = abs(u); } catch (e) {} return oO.apply(this, arguments); };\nXP.send = function () {\nvar x = this;\ntry {\nif (RE.test(x.__sopvpG || '')) x.addEventListener('load', function () {\ntry {\nif (x.status < 200 || x.status >= 300) return;\nvar t = (x.responseType === '' || x.responseType === 'text') ? x.responseText : (x.responseType === 'json' ? JSON.stringify(x.response) : null);\nif (t) take(x.responseURL || x.__sopvpG, t);\n} catch (e) {}\n});\n} catch (e) {}\nreturn oS.apply(this, arguments);\n};\nvar oF = window.fetch;\nif (typeof oF === 'function') window.fetch = function (i) {\nvar p = oF.apply(this, arguments);\ntry {\nvar u = abs(typeof i === 'string' ? i : (i && i.url));\nif (RE.test(u)) p.then(function (r) { if (r.ok) r.clone().text().then(function (t) { take(r.url || u, t); }, function () {}); }, function () {});\n} catch (e) {}\nreturn p;\n};\nfunction state() {\ntry {\nvar el = document.querySelector('#q-app') || document.querySelector('#app'), a = el && el.__vue_app__;\nvar p = a && a.config && a.config.globalProperties && a.config.globalProperties.$pinia;\nreturn p && p.state && p.state.value;\n} catch (e) { return null; }\n}\nfunction copy(o) { try { return JSON.parse(JSON.stringify(o)); } catch (e) { return null; } }\nfunction tick() {\nvar st = state();\nif (!st) return;\ntry {\nvar A = st.PvPArenaStore, d = A && A.currentDuel;\nif (d && d._id && d.logs && d.logs.length && !G.duels[d._id]) { G.duels[d._id] = copy(d); draw(); }\nvar s = st.squadronStore;\nif (!G.roster && s && s.group1 && s.group1.length) { G.roster = { t: Date.now(), body: JSON.stringify({ squad: [{ group1: copy(s.group1), group2: copy(s.group2 || []), group3: copy(s.group3 || []), available: [] }] }) }; draw(); }\n} catch (e) {}\n}\nsetInterval(tick, 1000);\n// The squadron's member list: the game page always holds it (names only).\nfunction sqNames(st) {\ntry {\nvar q = st.UserStore.squadron;\nif (!q || !Array.isArray(q.members) || !q.members.length) return [];\nreturn [{ t: Date.now(), sq: String(q.name || ''), names: q.members.map(function (m) { return m && m.username ? String(m.username) : null; }).filter(Boolean).slice(0, 300) }];\n} catch (e) { return []; }\n}\n// Squadron Groups as the page shows it right now (every member's PvP\n// points, gear and clones), once that tab has been opened. Members who are\n// in no group come from the game's last answer (lastBody), which lists them.\nfunction sqLive(st, lastBody) {\ntry {\nvar s = st.squadronStore;\nif (!s || !Array.isArray(s.group1)) return null;\nvar gs = [s.group1, s.group2 || [], s.group3 || []], n = 0, inG = {};\ngs.forEach(function (g) { g.forEach(function (m) { if (m && m.username && m.pvpstats) { n++; inG[m.username] = 1; } }); });\nif (!n) return null;\nvar av = Array.isArray(s.available) ? s.available : null;\nif (!av && lastBody) { try { var b = JSON.parse(lastBody), q = Array.isArray(b.squad) ? b.squad[0] : b; av = (q.available || []).filter(function (m) { return m && m.username && !inG[m.username]; }); } catch (e) { av = null; } }\nreturn { t: Date.now(), body: JSON.stringify({ squad: [{ group1: gs[0], group2: gs[1], group3: gs[2], available: av || [] }] }) };\n} catch (e) { return null; }\n}\nfunction build(st) {\ntry {\nvar U = st.UserStore, P = U.player, mats = {};\n(P.pvp_gear || []).forEach(function (g) { mats[String(g.statCost || '').toLowerCase()] = 1; });\nvar slots = (st.PetsStore && st.PetsStore.petSlots) || [], inSlot = {};\nslots.forEach(function (x) { if (x && x.pet) inSlot[x.pet] = 1; });\nreturn {\nUserStore: { username: U.username, pvp_badges: U.pvp_badges, player: copy({ pvp_gear: P.pvp_gear, pvpstats: P.pvpstats, clones: P.clones }) },\nCraftStore: { crafting_level: st.CraftStore && st.CraftStore.crafting_level },\nMaterialsStore: { materialsList: ((st.MaterialsStore && st.MaterialsStore.materialsList) || []).filter(function (m) { var n = m && m.item && (m.item.name || m.item); return n && mats[String(n).toLowerCase()]; }).map(function (m) { return { item: { name: m.item.name || m.item }, quantity: m.quantity }; }) },\nPetsStore: { petSlots: slots.filter(function (x) { return x && x.pet; }).map(function (x) { return { pet: x.pet }; }), pets: ((st.PetsStore && st.PetsStore.pets) || []).filter(function (p) { return p && inSlot[p._id] && p.name === 'Velari'; }).map(function (p) { return { _id: p._id, name: p.name, level: p.level }; }) }\n};\n} catch (e) { return null; }\n}\nfunction payload() {\nvar st = state();\nreturn { app: 'PvP Planner button', v: 1, made: Date.now(), me: st && st.UserStore ? st.UserStore.username : null, build: st ? build(st) : null,\nsquad: Object.keys(G.squad).map(function (k) { return { battle: G.squad[k] }; }),\nduel: Object.keys(G.duels).map(function (k) { return { duel: G.duels[k], saved: Date.now() }; }),\nduelList: Object.keys(G.list).map(function (k) { return { row: G.list[k] }; }),\nroster: (G.roster ? [G.roster] : []).concat(st && sqLive(st, G.roster && G.roster.body) ? [sqLive(st, G.roster && G.roster.body)] : []),\nmembers: st ? sqNames(st) : [] };\n}\nfunction send() {\nvar nonce = String(Math.random()).slice(2), w = window.open(PL + '#wait=' + nonce, '_blank');\nif (!w) { alert(L.p); return; }\nwindow.addEventListener('message', function on(e) {\nif (e.origin !== OR || !e.data || e.data.sopvpReady !== nonce || e.source !== w) return;\nwindow.removeEventListener('message', on);\ne.source.postMessage({ sopvpRaw: payload(), nonce: nonce }, OR);\n});\n}\nvar L = (function () {\nvar n = String((navigator.languages && navigator.languages[0]) || navigator.language || 'en').toLowerCase();\nvar T = {\nes: { m: 'miembros del escuadrón', b: 'batallas de escuadrón', d: 'duelos de arena abiertos', l: 'en la lista de arena', r: 'plantilla', y: 'sí', n: 'todavía no', h: 'Ahora recorre Registro de peleas › Escuadrón (50 por página, todas las páginas), abre Registro de peleas › Arena y abre Grupos de escuadrón. Ver pelea solo hace falta para rivales nunca vistos en una batalla de escuadrón. Deja esta pestaña abierta.', s: 'Enviar al planificador ↗', p: 'El navegador bloqueó la pestaña nueva: permite las ventanas emergentes de este sitio y vuelve a pulsar Enviar.' },\nzh: { m: '名舰队成员', b: '场舰队战斗', d: '场已打开的竞技场决斗', l: '条竞技场列表记录', r: '名单', y: '已有', n: '还没有', h: '现在浏览 战斗日志 › 舰队（每页 50 条，每一页都看），打开 战斗日志 › 竞技场，再打开舰队编组。只有从未在舰队战斗中见过的对手才需要点击查看战斗。请保持此标签页打开。', s: '发送到规划器 ↗', p: '浏览器拦截了新标签页：请允许本网站弹出窗口后再点一次发送。' },\nen: { m: 'squadron members', b: 'squadron battles', d: 'arena duels opened', l: 'in the Arena list', r: 'roster', y: 'yes', n: 'not yet', h: 'Now browse Battle Log › Squadron (50 per page, every page), open Battle Log › Arena, and open Squadron Groups. View battle is only needed for opponents never seen in a squadron battle. Keep this tab open.', s: 'Send to planner ↗', p: 'The browser blocked the new tab: allow pop-ups for this site, then click Send again.' }\n};\nreturn T[n.indexOf('es') === 0 ? 'es' : (n.indexOf('zh') === 0 ? 'zh' : 'en')];\n})();\nfunction draw() {\nif (!G.box) return;\nvar n = Object.keys(G.squad).length, d = Object.keys(G.duels).length, l = Object.keys(G.list).length;\nG.box.querySelector('.c').textContent = n + ' ' + L.b + ', ' + l + ' ' + L.l + ', ' + d + ' ' + L.d + ', ' + L.r + ': ' + (G.roster || (state() && sqLive(state(), null)) ? L.y : L.n) + (function () { var st = state(), m = st ? sqNames(st) : []; return m.length ? ', ' + m[0].names.length + ' ' + L.m : ''; })();\n}\nfunction show() {\nif (G.box) { G.box.style.display = 'block'; return; }\nvar b = document.createElement('div');\nb.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;background:#1a2129;color:#d5dde6;border:1px solid #4fb3e8;border-radius:10px;padding:10px 12px;font:13px sans-serif;max-width:300px;box-shadow:0 4px 16px rgba(0,0,0,.4)';\nb.innerHTML = '<b>PvP Planner<\/b> <span style=\"float:right;cursor:pointer\" class=\"x\">✕<\/span><div class=\"c\" style=\"margin:6px 0\"><\/div>' +\n'<div class=\"h\" style=\"font-size:11px;color:#9aa8b6;margin-bottom:8px\"><\/div>' +\n'<button class=\"s\" style=\"background:#4fb3e8;color:#0d1b24;border:0;border-radius:7px;padding:6px 12px;font-weight:600;cursor:pointer\"><\/button>';\nb.querySelector('.s').textContent = L.s;\nb.querySelector('.h').textContent = L.h;\nb.querySelector('.x').onclick = function () { b.style.display = 'none'; };\nb.querySelector('.s').onclick = send;\ndocument.body.appendChild(b);\nG.box = b; draw();\n}\nwindow.__sopvpGrab = { show: show, data: G };\ntick(); show();\n})();";
 
   /* ============================================================
@@ -598,6 +598,10 @@
       'Every fight here always goes the same way: no change of build alters it.': 'Aquí cada pelea acaba siempre igual: ningún cambio de build lo altera.',
       '{0}% → {1}% with free changes (points, gear stats, skills). Green: what to change.': '{0}% → {1}% con cambios gratis (puntos, stats del equipo, habilidades). Verde: lo que hay que cambiar.',
       'Reach a win %': 'Alcanzar un % de victoria',
+      "<b>PvP Collector (best, for the whole squadron):</b> install <a href=\"https://www.tampermonkey.net/\" target=\"_blank\" rel=\"noopener\">Tampermonkey</a>, then <a href=\"{0}\" target=\"_blank\" rel=\"noopener\">PvP Collector</a>. That is all: play as usual, and what the game shows you reaches this planner by itself, for everyone. A small badge in the game shows it is working and tells you when an update is out.": "<b>PvP Collector (lo mejor, para todo el escuadrón):</b> instala <a href=\"https://www.tampermonkey.net/\" target=\"_blank\" rel=\"noopener\">Tampermonkey</a> y luego <a href=\"{0}\" target=\"_blank\" rel=\"noopener\">PvP Collector</a>. Eso es todo: juega como siempre y lo que el juego te muestra llega solo a este planificador, para todos. Una pequeña insignia en el juego muestra que funciona y te avisa cuando hay una actualización.",
+      "Click it once each time the game is open: it keeps what the game loads from then on and sends it to the planner, until the tab is closed. It is always the newest version. Web browsers only, not the Steam app.": "Haz clic una vez cada vez que abras el juego: guarda lo que el juego carga desde entonces y lo envía al planificador, hasta que cierres la pestaña. Siempre es la versión más reciente. Solo navegadores web, no la app de Steam.",
+      "Older ways (no cloud): PvP Meta and the PvP Planner button": "Formas antiguas (sin nube): PvP Meta y el botón PvP Planner",
+      "Drag this button to your bookmarks bar, then click it on the game page.": "Arrastra este botón a tu barra de marcadores y luego haz clic en él en la página del juego.",
       "Fight earlier": "Pelear antes",
       "Fight later": "Pelear después",
       "{0} damage · {1} HP": "{0} daño · {1} PV",
@@ -1171,6 +1175,10 @@
       'Every fight here always goes the same way: no change of build alters it.': '这里每场战斗结果都相同：改配置也无法改变。',
       '{0}% → {1}% with free changes (points, gear stats, skills). Green: what to change.': '{0}% → {1}%，只需免费调整（点数、装备属性、技能）。绿色：需要更改的项。',
       'Reach a win %': '达到目标胜率',
+      "<b>PvP Collector (best, for the whole squadron):</b> install <a href=\"https://www.tampermonkey.net/\" target=\"_blank\" rel=\"noopener\">Tampermonkey</a>, then <a href=\"{0}\" target=\"_blank\" rel=\"noopener\">PvP Collector</a>. That is all: play as usual, and what the game shows you reaches this planner by itself, for everyone. A small badge in the game shows it is working and tells you when an update is out.": "<b>PvP Collector（最佳，全舰队共享）：</b>安装 <a href=\"https://www.tampermonkey.net/\" target=\"_blank\" rel=\"noopener\">Tampermonkey</a>，再安装 <a href=\"{0}\" target=\"_blank\" rel=\"noopener\">PvP Collector</a>。就这样：照常游戏，游戏显示给你的内容会自动发送到这个规划器，所有人共享。游戏里的小标记会显示它在工作，并在有更新时提醒你。",
+      "Click it once each time the game is open: it keeps what the game loads from then on and sends it to the planner, until the tab is closed. It is always the newest version. Web browsers only, not the Steam app.": "每次打开游戏时点击一次：从那时起它会保存游戏加载的内容并发送到规划器，直到关闭该标签页。它总是最新版本。仅限网页浏览器，不支持 Steam 应用。",
+      "Older ways (no cloud): PvP Meta and the PvP Planner button": "旧方式（不经云端）：PvP Meta 和 PvP Planner 按钮",
+      "Drag this button to your bookmarks bar, then click it on the game page.": "把这个按钮拖到书签栏，然后在游戏页面上点击它。",
       "Fight earlier": "提前出战",
       "Fight later": "推后出战",
       "{0} damage · {1} HP": "{0} 伤害 · {1} 生命",
@@ -2974,7 +2982,9 @@
       if (!r || !(r.t > 0) || !Array.isArray(r.names) || !r.names.length) return;
       var row = { t: r.t, sq: String(r.sq || ''), names: r.names.filter(function (n) { return typeof n === 'string' && n; }).slice(0, 300) };
       if (srv) sent.m[row.sq + '|' + row.t] = 1;
-      if (!ARCH.members.some(function (o) { return o.t === row.t && o.sq === row.sq; })) ARCH.members.push(row);
+      // The same list seen again (another member, the same file twice) is kept once, at its newest time.
+      var nk = JSON.stringify(row.names), same = ARCH.members.filter(function (o) { return o.sq === row.sq && JSON.stringify(o.names) === nk; })[0];
+      if (same) { if (row.t > same.t) same.t = row.t; } else ARCH.members.push(row);
     });
     ARCH.members.sort(function (x, y) { return x.t - y.t; });
     if (ARCH.members.length > 40) ARCH.members = ARCH.members.slice(-40);
@@ -2992,21 +3002,28 @@
     // Map snapshots made small by pxMap (1.11.0): zone holders, their strength, attacks.
     if (!ARCH.maps) ARCH.maps = [];
     if (!sent.t) sent.t = {};
-    var mk = {};
-    ARCH.maps.forEach(function (m) { mk[m.t] = 1; });
+    var mk = {}, mc = {};
+    ARCH.maps.forEach(function (m) { mk[m.t] = 1; mc[JSON.stringify(m.tiles)] = m; });
     (a.map || []).forEach(function (m) {
       // The script's own archive keeps the game's map answer as text: made small here.
       if (m && !Array.isArray(m.tiles) && typeof m.body === 'string') { var mb = null; try { mb = JSON.parse(m.body); } catch (e) {} m = mb && mb.map ? pxMap(mb.map, mb.threat, m.t) : null; }
       if (!m || !(m.t > 0) || !Array.isArray(m.tiles) || mk[m.t]) return;
-      mk[m.t] = 1; ARCH.maps.push({ t: m.t, tiles: m.tiles }); nx++;
+      mk[m.t] = 1;
       if (srv) sent.t[m.t] = 1;
+      // The same map seen again is kept once, at its newest time.
+      var tk = JSON.stringify(m.tiles);
+      if (mc[tk]) { if (m.t > mc[tk].t) { mc[tk].t = m.t; nx++; } return; }
+      mc[tk] = { t: m.t, tiles: m.tiles }; ARCH.maps.push(mc[tk]); nx++;
     });
     ARCH.maps.sort(function (x, y) { return x.t - y.t; });
     if (ARCH.maps.length > 400) ARCH.maps = ARCH.maps.slice(-400);
     // From the shared store: what it holds counts as sent; anything newer here is still sent.
     if (srv) des.forEach(function (e) { var k = e.k + '|' + e.id; sent.x[k] = Math.max(sent.x[k] || 0, e.t || 0); });
     (a.roster || []).forEach(function (r) {
-      if (r && r.body && !ARCH.roster.some(function (o) { return o.t === r.t && o.body === r.body; })) ARCH.roster.push({ t: r.t || Date.now(), body: r.body });
+      if (r && r.body) {
+        var rs = ARCH.roster.filter(function (o) { return o.body === r.body; })[0];
+        if (rs) { if ((r.t || 0) > rs.t) rs.t = r.t; } else ARCH.roster.push({ t: r.t || Date.now(), body: r.body });
+      }
       if (srv && r && r.t) sent.r[r.t] = 1;
     });
     ARCH.roster.sort(function (x, y) { return x.t - y.t; });
@@ -5306,6 +5323,9 @@
   var savedKey = store.get('key', '') || '';
   var B = function (k, cls) { return '<div class="line' + (cls ? ' ' + cls : '') + '">' + t(k) + '</div>'; };
   var SCRIPT_URL = 'https://raw.githubusercontent.com/JohnnyBoyQC/stellar-odyssey-pvp-planner/main/pvp-meta.user.js';
+  // The PvP Collector (1.12.0): the userscript, and the bookmarklet that loads the newest copy.
+  var COL_SCRIPT_URL = 'https://raw.githubusercontent.com/JohnnyBoyQC/stellar-odyssey-pvp-planner/main/pvp-collector.user.js';
+  var COL_BOOKMARK = "javascript:(function(){var s=document.createElement('script');s.src='https://johnnyboyqc.github.io/stellar-odyssey-pvp-planner/pvp-collector.js?t='+Date.now();document.body.appendChild(s);})()";
   var firstVisit = !store.get('seen', false); store.set('seen', true);
   var ALLTABS = /[?&]all\b/.test(location.search);   // every section at once (printing, tests)
   root.innerHTML =
@@ -5334,11 +5354,15 @@
     '</div>' +
     '<details class="box how more" id="howto"' + (firstVisit || ALLTABS ? ' open' : '') + '><summary>' + esc(t('How to bring your fights in')) + '</summary>' +
     '<ol>' +
+    '<li id="colbox">' + t('<b>PvP Collector (best, for the whole squadron):</b> install <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">Tampermonkey</a>, then <a href="{0}" target="_blank" rel="noopener">PvP Collector</a>. That is all: play as usual, and what the game shows you reaches this planner by itself, for everyone. A small badge in the game shows it is working and tells you when an update is out.', [COL_SCRIPT_URL]) + '</li>' +
+    '<li id="colbook">' + t('<b>No install:</b> drag this button to your bookmarks bar (Ctrl+Shift+B shows it):') + ' <a id="collink" class="grab" href="#">⚔ PvP Collector</a> ' + t('Click it once each time the game is open: it keeps what the game loads from then on and sends it to the planner, until the tab is closed. It is always the newest version. Web browsers only, not the Steam app.') + '</li>' +
+    '<li>' + t('<b>Build only:</b> paste your API key below.') + '</li>' +
+    '</ol>' +
+    '<details class="more"' + (ALLTABS ? ' open' : '') + '><summary>' + esc(t('Older ways (no cloud): PvP Meta and the PvP Planner button')) + '</summary><ol>' +
     '<li>' + t('<b>Script (best):</b> install <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">Tampermonkey</a>, then <a href="{0}" target="_blank" rel="noopener">PvP Meta</a>. In the game open Battlefield › Battle Log › Squadron (50 per page, every page), Battle Log › Arena and Squadron Groups. Then click <b>⚔ PvP Meta › Open in planner ↗</b>.', [SCRIPT_URL]) + '</li>' +
     '<li id="grabbox">' + t('<b>No install:</b> drag this button to your bookmarks bar (Ctrl+Shift+B shows it):') + ' <a id="grablink" class="grab" href="#">⚔ PvP Planner</a> ' + t('Click it on the game page, open the same three pages, then click <b>Send to planner</b>. Web browsers only, not the Steam app.') +
     ' <button class="sec" id="b_grabcopy" style="padding:3px 9px;font-size:12px">' + esc(t('Copy the code')) + '</button> <span class="mu">' + esc(t('(for the F12 console, if bookmarks are not possible)')) + '</span></li>' +
-    '<li>' + t('<b>Build only:</b> paste your API key below.') + '</li>' +
-    '</ol>' +
+    '</ol></details>' +
     B('Read-only: nothing here acts in the game. View battle on an arena duel is only needed for a player never seen in a squadron battle.', 'mu') +
     '</details>' +
     '<div class="box"><h4 style="margin-top:0">' + esc(t('Your build from the API')) + '</h4>' +
@@ -5558,6 +5582,8 @@
   $('f_arcfile').addEventListener('change', function () { var f = $('f_arcfile').files[0]; if (f) impFile(f); $('f_arcfile').value = ''; });
   $('b_impshare').addEventListener('click', impShare);
   $('grablink').setAttribute('href', 'javascript:' + encodeURIComponent(GRAB_SRC));
+  $('collink').setAttribute('href', COL_BOOKMARK);
+  $('collink').addEventListener('click', function (e) { e.preventDefault(); impMsg(t('Drag this button to your bookmarks bar, then click it on the game page.'), 'mu'); });
   $('grablink').addEventListener('click', function (e) { e.preventDefault(); impMsg(t('Drag the button to your bookmarks bar, then click it on the game page.'), 'warn'); });
   $('b_grabcopy').addEventListener('click', function () {
     var b = $('b_grabcopy'), ok = function () { b.textContent = t('Copied'); };
