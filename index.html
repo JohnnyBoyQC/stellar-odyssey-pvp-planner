@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PvP Build Planner (beta)</title>
-<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.11.4">
+<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.11.5">
 </head>
 <body>
 <script>
 (function () {
   'use strict';
-  var PAGE_VER = "1.11.4";
+  var PAGE_VER = "1.11.5";
   var GRAB_SRC = "(function () {\nif (window.__sopvpGrab) { window.__sopvpGrab.show(); return; }\nvar PL = 'https://johnnyboyqc.github.io/stellar-odyssey-pvp-planner/', OR = 'https://johnnyboyqc.github.io';\nvar G = { squad: {}, roster: null, duels: {}, list: {}, box: null };\nvar RE = /\\/api\\/(squadrons\\/(battlelog|groups)|battlefield\\/arenaduels)(\\?|$)/;\nfunction abs(u) { try { return new URL(String((u && u.href) || u), location.href).href; } catch (e) { return String(u); } }\nfunction take(url, text) {\nvar b;\ntry { b = JSON.parse(text); } catch (e) { return; }\nif (/battlelog/.test(url)) (b && b.battles || []).forEach(function (x) { if (x && x._id && Array.isArray(x.logs)) G.squad[x._id] = x; });\nelse if (/arenaduels/.test(url)) (b && b.results || []).forEach(function (x) { if (x && x._id && x.attackerName && x.defenderName) G.list[x._id] = x; });\nelse G.roster = { t: Date.now(), body: text };\ndraw();\n}\nvar XP = XMLHttpRequest.prototype, oO = XP.open, oS = XP.send;\nXP.open = function (m, u) { try { this.__sopvpG = abs(u); } catch (e) {} return oO.apply(this, arguments); };\nXP.send = function () {\nvar x = this;\ntry {\nif (RE.test(x.__sopvpG || '')) x.addEventListener('load', function () {\ntry {\nif (x.status < 200 || x.status >= 300) return;\nvar t = (x.responseType === '' || x.responseType === 'text') ? x.responseText : (x.responseType === 'json' ? JSON.stringify(x.response) : null);\nif (t) take(x.responseURL || x.__sopvpG, t);\n} catch (e) {}\n});\n} catch (e) {}\nreturn oS.apply(this, arguments);\n};\nvar oF = window.fetch;\nif (typeof oF === 'function') window.fetch = function (i) {\nvar p = oF.apply(this, arguments);\ntry {\nvar u = abs(typeof i === 'string' ? i : (i && i.url));\nif (RE.test(u)) p.then(function (r) { if (r.ok) r.clone().text().then(function (t) { take(r.url || u, t); }, function () {}); }, function () {});\n} catch (e) {}\nreturn p;\n};\nfunction state() {\ntry {\nvar el = document.querySelector('#q-app') || document.querySelector('#app'), a = el && el.__vue_app__;\nvar p = a && a.config && a.config.globalProperties && a.config.globalProperties.$pinia;\nreturn p && p.state && p.state.value;\n} catch (e) { return null; }\n}\nfunction copy(o) { try { return JSON.parse(JSON.stringify(o)); } catch (e) { return null; } }\nfunction tick() {\nvar st = state();\nif (!st) return;\ntry {\nvar A = st.PvPArenaStore, d = A && A.currentDuel;\nif (d && d._id && d.logs && d.logs.length && !G.duels[d._id]) { G.duels[d._id] = copy(d); draw(); }\nvar s = st.squadronStore;\nif (!G.roster && s && s.group1 && s.group1.length) { G.roster = { t: Date.now(), body: JSON.stringify({ squad: [{ group1: copy(s.group1), group2: copy(s.group2 || []), group3: copy(s.group3 || []), available: [] }] }) }; draw(); }\n} catch (e) {}\n}\nsetInterval(tick, 1000);\n// The squadron's member list: the game page always holds it (names only).\nfunction sqNames(st) {\ntry {\nvar q = st.UserStore.squadron;\nif (!q || !Array.isArray(q.members) || !q.members.length) return [];\nreturn [{ t: Date.now(), sq: String(q.name || ''), names: q.members.map(function (m) { return m && m.username ? String(m.username) : null; }).filter(Boolean).slice(0, 300) }];\n} catch (e) { return []; }\n}\n// Squadron Groups as the page shows it right now (every member's PvP\n// points, gear and clones), once that tab has been opened. Members who are\n// in no group come from the game's last answer (lastBody), which lists them.\nfunction sqLive(st, lastBody) {\ntry {\nvar s = st.squadronStore;\nif (!s || !Array.isArray(s.group1)) return null;\nvar gs = [s.group1, s.group2 || [], s.group3 || []], n = 0, inG = {};\ngs.forEach(function (g) { g.forEach(function (m) { if (m && m.username && m.pvpstats) { n++; inG[m.username] = 1; } }); });\nif (!n) return null;\nvar av = Array.isArray(s.available) ? s.available : null;\nif (!av && lastBody) { try { var b = JSON.parse(lastBody), q = Array.isArray(b.squad) ? b.squad[0] : b; av = (q.available || []).filter(function (m) { return m && m.username && !inG[m.username]; }); } catch (e) { av = null; } }\nreturn { t: Date.now(), body: JSON.stringify({ squad: [{ group1: gs[0], group2: gs[1], group3: gs[2], available: av || [] }] }) };\n} catch (e) { return null; }\n}\nfunction build(st) {\ntry {\nvar U = st.UserStore, P = U.player, mats = {};\n(P.pvp_gear || []).forEach(function (g) { mats[String(g.statCost || '').toLowerCase()] = 1; });\nvar slots = (st.PetsStore && st.PetsStore.petSlots) || [], inSlot = {};\nslots.forEach(function (x) { if (x && x.pet) inSlot[x.pet] = 1; });\nreturn {\nUserStore: { username: U.username, pvp_badges: U.pvp_badges, player: copy({ pvp_gear: P.pvp_gear, pvpstats: P.pvpstats, clones: P.clones }) },\nCraftStore: { crafting_level: st.CraftStore && st.CraftStore.crafting_level },\nMaterialsStore: { materialsList: ((st.MaterialsStore && st.MaterialsStore.materialsList) || []).filter(function (m) { var n = m && m.item && (m.item.name || m.item); return n && mats[String(n).toLowerCase()]; }).map(function (m) { return { item: { name: m.item.name || m.item }, quantity: m.quantity }; }) },\nPetsStore: { petSlots: slots.filter(function (x) { return x && x.pet; }).map(function (x) { return { pet: x.pet }; }), pets: ((st.PetsStore && st.PetsStore.pets) || []).filter(function (p) { return p && inSlot[p._id] && p.name === 'Velari'; }).map(function (p) { return { _id: p._id, name: p.name, level: p.level }; }) }\n};\n} catch (e) { return null; }\n}\nfunction payload() {\nvar st = state();\nreturn { app: 'PvP Planner button', v: 1, made: Date.now(), me: st && st.UserStore ? st.UserStore.username : null, build: st ? build(st) : null,\nsquad: Object.keys(G.squad).map(function (k) { return { battle: G.squad[k] }; }),\nduel: Object.keys(G.duels).map(function (k) { return { duel: G.duels[k], saved: Date.now() }; }),\nduelList: Object.keys(G.list).map(function (k) { return { row: G.list[k] }; }),\nroster: (G.roster ? [G.roster] : []).concat(st && sqLive(st, G.roster && G.roster.body) ? [sqLive(st, G.roster && G.roster.body)] : []),\nmembers: st ? sqNames(st) : [] };\n}\nfunction send() {\nvar nonce = String(Math.random()).slice(2), w = window.open(PL + '#wait=' + nonce, '_blank');\nif (!w) { alert(L.p); return; }\nwindow.addEventListener('message', function on(e) {\nif (e.origin !== OR || !e.data || e.data.sopvpReady !== nonce || e.source !== w) return;\nwindow.removeEventListener('message', on);\ne.source.postMessage({ sopvpRaw: payload(), nonce: nonce }, OR);\n});\n}\nvar L = (function () {\nvar n = String((navigator.languages && navigator.languages[0]) || navigator.language || 'en').toLowerCase();\nvar T = {\nes: { m: 'miembros del escuadrón', b: 'batallas de escuadrón', d: 'duelos de arena abiertos', l: 'en la lista de arena', r: 'plantilla', y: 'sí', n: 'todavía no', h: 'Ahora recorre Registro de peleas › Escuadrón (50 por página, todas las páginas), abre Registro de peleas › Arena y abre Grupos de escuadrón. Ver pelea solo hace falta para rivales nunca vistos en una batalla de escuadrón. Deja esta pestaña abierta.', s: 'Enviar al planificador ↗', p: 'El navegador bloqueó la pestaña nueva: permite las ventanas emergentes de este sitio y vuelve a pulsar Enviar.' },\nzh: { m: '名舰队成员', b: '场舰队战斗', d: '场已打开的竞技场决斗', l: '条竞技场列表记录', r: '名单', y: '已有', n: '还没有', h: '现在浏览 战斗日志 › 舰队（每页 50 条，每一页都看），打开 战斗日志 › 竞技场，再打开舰队编组。只有从未在舰队战斗中见过的对手才需要点击查看战斗。请保持此标签页打开。', s: '发送到规划器 ↗', p: '浏览器拦截了新标签页：请允许本网站弹出窗口后再点一次发送。' },\nen: { m: 'squadron members', b: 'squadron battles', d: 'arena duels opened', l: 'in the Arena list', r: 'roster', y: 'yes', n: 'not yet', h: 'Now browse Battle Log › Squadron (50 per page, every page), open Battle Log › Arena, and open Squadron Groups. View battle is only needed for opponents never seen in a squadron battle. Keep this tab open.', s: 'Send to planner ↗', p: 'The browser blocked the new tab: allow pop-ups for this site, then click Send again.' }\n};\nreturn T[n.indexOf('es') === 0 ? 'es' : (n.indexOf('zh') === 0 ? 'zh' : 'en')];\n})();\nfunction draw() {\nif (!G.box) return;\nvar n = Object.keys(G.squad).length, d = Object.keys(G.duels).length, l = Object.keys(G.list).length;\nG.box.querySelector('.c').textContent = n + ' ' + L.b + ', ' + l + ' ' + L.l + ', ' + d + ' ' + L.d + ', ' + L.r + ': ' + (G.roster || (state() && sqLive(state(), null)) ? L.y : L.n) + (function () { var st = state(), m = st ? sqNames(st) : []; return m.length ? ', ' + m[0].names.length + ' ' + L.m : ''; })();\n}\nfunction show() {\nif (G.box) { G.box.style.display = 'block'; return; }\nvar b = document.createElement('div');\nb.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;background:#1a2129;color:#d5dde6;border:1px solid #4fb3e8;border-radius:10px;padding:10px 12px;font:13px sans-serif;max-width:300px;box-shadow:0 4px 16px rgba(0,0,0,.4)';\nb.innerHTML = '<b>PvP Planner<\/b> <span style=\"float:right;cursor:pointer\" class=\"x\">✕<\/span><div class=\"c\" style=\"margin:6px 0\"><\/div>' +\n'<div class=\"h\" style=\"font-size:11px;color:#9aa8b6;margin-bottom:8px\"><\/div>' +\n'<button class=\"s\" style=\"background:#4fb3e8;color:#0d1b24;border:0;border-radius:7px;padding:6px 12px;font-weight:600;cursor:pointer\"><\/button>';\nb.querySelector('.s').textContent = L.s;\nb.querySelector('.h').textContent = L.h;\nb.querySelector('.x').onclick = function () { b.style.display = 'none'; };\nb.querySelector('.s').onclick = send;\ndocument.body.appendChild(b);\nG.box = b; draw();\n}\nwindow.__sopvpGrab = { show: show, data: G };\ntick(); show();\n})();";
 
   /* ============================================================
@@ -598,6 +598,40 @@
       'Every fight here always goes the same way: no change of build alters it.': 'Aquí cada pelea acaba siempre igual: ningún cambio de build lo altera.',
       '{0}% → {1}% with free changes (points, gear stats, skills). Green: what to change.': '{0}% → {1}% con cambios gratis (puntos, stats del equipo, habilidades). Verde: lo que hay que cambiar.',
       'Reach a win %': 'Alcanzar un % de victoria',
+      "Fight earlier": "Pelear antes",
+      "Fight later": "Pelear después",
+      "{0} damage · {1} HP": "{0} daño · {1} PV",
+      "Add a member...": "Añadir un miembro...",
+      "from group {0}": "del grupo {0}",
+      "bench": "banquillo",
+      "Back to the groups as they are now": "Volver a los grupos actuales",
+      "Nobody in this group is ticked to play.": "Nadie de este grupo está marcado para jugar.",
+      "Enemy group": "Grupo enemigo",
+      "My group": "Mi grupo",
+      "(edited)": "(editado)",
+      "{0} members": "{0} miembros",
+      "search squadron or member": "buscar escuadrón o miembro",
+      "members beaten on average": "miembros vencidos de media",
+      "beats {0}": "vence a {0}",
+      "Line-up from your last battle with them, {0} · met {1}x.": "Alineación de vuestra última batalla con ellos, {0} · enfrentados {1} veces.",
+      "Old line-up: they may have changed members or builds since.": "Alineación antigua: puede que hayan cambiado miembros o builds desde entonces.",
+      "? = weak estimate ({0} of {1} members): few shots seen.": "? = estimación débil ({0} de {1} miembros): pocos disparos vistos.",
+      "Pick an enemy group.": "Elige un grupo enemigo.",
+      "The test failed: {0}": "La prueba falló: {0}",
+      "We attack them": "Nosotros atacamos",
+      "They attack us": "Ellos nos atacan",
+      "Average {0}% ±{1}": "Media {0}% ±{1}",
+      "Your best: #{0} {1} beats {2} of theirs on average.": "Tu mejor: #{0} {1} vence a {2} de los suyos de media.",
+      "Their danger: #{0} {1} beats {2} of yours on average.": "Su peligro: #{0} {1} vence a {2} de los tuyos de media.",
+      "On average you lose {0} of {1} members, they lose {2} of {3}.": "De media pierdes {0} de {1} miembros; ellos pierden {2} de {3}.",
+      "{0} of their members have no build yet and are left out.": "{0} de sus miembros aún no tienen build y quedan fuera.",
+      "Zones": "Zonas",
+      "No map yet: it fills by itself when the Battlefield map is open in the game with PvP Meta, or from the cloud.": "Aún no hay mapa: se llena solo cuando el mapa del Campo de batalla está abierto en el juego con PvP Meta, o desde la nube.",
+      "Load this holder as the enemy": "Cargar a este ocupante como enemigo",
+      "▶ = we have their line-up: click the zone to see your chance against its holder.": "▶ = tenemos su alineación: haz clic en la zona para ver tu probabilidad contra su ocupante.",
+      "Best groups": "Mejores grupos",
+      "Tick up to 3 enemy groups: the planner splits your members into groups and orders them to beat those.": "Marca hasta 3 grupos enemigos: el planificador reparte tus miembros en grupos y los ordena para vencerlos.",
+      "Change all 3 groups": "Cambiar los 3 grupos",
       'I want to win': 'Quiero ganar el',
       'Searching...': 'Buscando...',
       'Find levels and tiers': 'Buscar niveles y rangos',
@@ -1137,6 +1171,36 @@
       'Every fight here always goes the same way: no change of build alters it.': '这里每场战斗结果都相同：改配置也无法改变。',
       '{0}% → {1}% with free changes (points, gear stats, skills). Green: what to change.': '{0}% → {1}%，只需免费调整（点数、装备属性、技能）。绿色：需要更改的项。',
       'Reach a win %': '达到目标胜率',
+      "Fight earlier": "提前出战",
+      "Fight later": "推后出战",
+      "{0} damage · {1} HP": "{0} 伤害 · {1} 生命",
+      "Add a member...": "添加成员...",
+      "from group {0}": "来自第 {0} 组",
+      "Back to the groups as they are now": "恢复为当前编组",
+      "Nobody in this group is ticked to play.": "本组没有人被勾选出战。",
+      "My group": "我的编组",
+      "(edited)": "(已修改)",
+      "search squadron or member": "搜索舰队或成员",
+      "members beaten on average": "平均击败的成员数",
+      "beats {0}": "击败 {0}",
+      "Line-up from your last battle with them, {0} · met {1}x.": "阵容来自你们与他们的上一场战斗,{0} · 交手 {1} 次。",
+      "Old line-up: they may have changed members or builds since.": "阵容较旧:他们之后可能换了成员或配置。",
+      "? = weak estimate ({0} of {1} members): few shots seen.": "? = 估计较弱({1} 名成员中 {0} 名):看到的射击太少。",
+      "Pick an enemy group.": "请选择一个敌方编组。",
+      "The test failed: {0}": "测试失败:{0}",
+      "We attack them": "我们进攻",
+      "They attack us": "他们进攻我们",
+      "Average {0}% ±{1}": "平均 {0}% ±{1}",
+      "Your best: #{0} {1} beats {2} of theirs on average.": "你方最强:#{0} {1} 平均击败对方 {2} 人。",
+      "Their danger: #{0} {1} beats {2} of yours on average.": "对方威胁:#{0} {1} 平均击败你方 {2} 人。",
+      "On average you lose {0} of {1} members, they lose {2} of {3}.": "平均你方损失 {1} 人中的 {0} 人,对方损失 {3} 人中的 {2} 人。",
+      "{0} of their members have no build yet and are left out.": "对方有 {0} 名成员还没有配置,未计入。",
+      "Zones": "区域",
+      "No map yet: it fills by itself when the Battlefield map is open in the game with PvP Meta, or from the cloud.": "还没有地图:在游戏中打开战场地图并运行 PvP Meta 时会自动填入,或从云端获取。",
+      "Load this holder as the enemy": "将该占领者设为敌方",
+      "▶ = we have their line-up: click the zone to see your chance against its holder.": "▶ = 我们有他们的阵容:点击该区域查看你对占领者的胜率。",
+      "Tick up to 3 enemy groups: the planner splits your members into groups and orders them to beat those.": "最多勾选 3 个敌方编组:规划器会把你的成员分组并排好顺序来击败他们。",
+      "Change all 3 groups": "修改全部 3 个编组",
       'I want to win': '我想要的胜率',
       'Searching...': '正在搜索...',
       'Find levels and tiers': '计算等级和等阶',
@@ -1236,7 +1300,7 @@
     return [numOr, btRng, arAssume, arDraws, arSide, pvAllocate, pvBestAssign, pvClimb, pvKeepGear, pvCompositions, pvCopy, pvGap, pvGearBase, pvGearVal, pvLevelCost,
       pvMetaPool, pvNeedFor, pvPlanRun, pvPool, pvPoolRef, pvReplay, pvSample, pvScore, pvScoreOf, pvSkills, pvSpend, pvTerm, pvTargetRun,
       pvTierCost, pvTotals, pvUpgradeRows, rlDuel, rlLeft, rlLoad, rlMe, rlPhase, rlSlot, rngStreams,
-      sqDebuff, sqFloor, sqSide, sqEnter, sqHealth, sqLeft, sqPhase, sqFight, gbNorm, gbDraw, gbGroup, gbPerms, gbStr, gbOrder, gbOptimise];
+      sqDebuff, sqFloor, sqSide, sqEnter, sqHealth, sqLeft, sqPhase, sqFight, gbNorm, gbDraw, gbGroup, gbDuo, gbPerms, gbStr, gbOrder, gbOptimise];
   }
   function wkMain() {
     self.onmessage = function (e) {
@@ -1245,6 +1309,11 @@
         if (job.kind === 'gb') {
           var res = gbOptimise(job.pool, job.start, job.enemies, job.opt, function (t) { self.postMessage({ type: 'prog', t: t }); });
           self.postMessage({ type: 'gb', res: res });
+          self.postMessage({ type: 'done' });
+          return;
+        }
+        if (job.kind === 'gbd') {
+          self.postMessage({ type: 'gbd', res: gbDuo(job.mine, job.foe, job.sims, job.seed) });
           self.postMessage({ type: 'done' });
           return;
         }
@@ -2442,7 +2511,7 @@
   function sqFloor(x, f) { return f < 1 ? Math.max(Math.min(x, 100), x * f) : x; }
 
   function sqSide(members) {
-    return { m: members, i: 0, hp: [], ch: [], st: [], alive: 0, mark: -1, kills: 0, lostAt: [], left: 0 };
+    return { m: members, i: 0, hp: [], ch: [], st: [], alive: 0, mark: -1, kills: 0, lostAt: [], left: 0, kb: [] };
   }
   function sqEnter(s) {
     while (s.i < s.m.length) {
@@ -2524,6 +2593,7 @@
         if (log) log.push({ round: round, attacker: null, defender: nm(T, t), action: 'dies', value: 0, hpLeft: '' });
         if (d.alive <= 0) {
           a.kills++;
+          a.kb[a.i] = (a.kb[a.i] || 0) + 1;   // members beaten, per member of the side (1.11.5)
           d.lostAt.push(round);
           d.i++;
           if (!sqEnter(d)) return;
@@ -2552,7 +2622,7 @@
     else if (d.i !== a.i) win = d.i > a.i ? 1 : 0;          // more member kills
     else { var la = sqLeft(a), ld = sqLeft(d); win = la > ld ? 1 : 0; }   // more health left, else the defender
     if (log) log.push({ round: 0, attacker: win ? 'A' : null, defender: win ? null : 'D', action: 'won', value: 0, hpLeft: '' });
-    return { win: win, rounds: Math.min(r, SQ_MAX_ROUNDS), healthA: ha, healthD: hd, outA: Math.min(a.i, A.length), outD: Math.min(d.i, D.length), log: log };
+    return { win: win, rounds: Math.min(r, SQ_MAX_ROUNDS), healthA: ha, healthD: hd, outA: Math.min(a.i, A.length), outD: Math.min(d.i, D.length), kbA: a.kb, kbD: d.kb, log: log };
   }
 
   // Many fights with different luck: the share A wins, and the average
@@ -2633,6 +2703,26 @@
       tot += p;
     }
     return { p: tot / enemies.length, cells: out };
+  }
+
+  // One of our groups against one enemy group, for the Battlefield panels (1.11.5): the
+  // chance attacking and defending, and how many enemy members each of ours beats on
+  // average (and each of theirs beats of ours), with the same draws as gbGroup.
+  function gbDuo(G, E0, sims, seed) {
+    var kM = G.map(function () { return 0; }), kE = E0.map(function () { return 0; }), wa = 0, wd = 0, rr = 0, oM = 0, oE = 0;
+    for (var i = 0; i < sims; i++) {
+      var s = (seed + i * 7919) | 0, r = btRng(s ^ 0x5bd1e995);
+      var E = E0.map(function (m) { return gbDraw(m, r); });
+      var att = i % 2 === 0, f = att ? sqFight(G, E, s, false) : sqFight(E, G, s, false);
+      var mine = att ? f.kbA : f.kbD, theirs = att ? f.kbD : f.kbA;
+      for (var a = 0; a < G.length; a++) kM[a] += mine[a] || 0;
+      for (var b = 0; b < E0.length; b++) kE[b] += theirs[b] || 0;
+      if (att) wa += f.win; else wd += 1 - f.win;
+      rr += f.rounds; oM += att ? f.outA : f.outD; oE += att ? f.outD : f.outA;
+    }
+    var na = Math.ceil(sims / 2), nd = Math.floor(sims / 2), p = (wa + wd) / sims;
+    return { p: p, pA: na ? wa / na : 0, pD: nd ? wd / nd : 0, se: Math.sqrt(Math.max(p * (1 - p), 0.25 / sims) / sims), n: sims, rounds: rr / sims,
+      kM: kM.map(function (x) { return x / sims; }), kE: kE.map(function (x) { return x / sims; }), lostM: oM / sims, lostE: oE / sims };
   }
 
   function gbPerms(n) {
@@ -4006,11 +4096,159 @@
     return lines.join('\n');
   }
 
+  /* ---- Battlefield view (1.11.5): built like the Arena tab. My group | the chance
+     (we attack them / they attack us, who beats whom in the relay) | the enemy group,
+     then Best groups | Zones on the map (click a zone: its holder becomes the enemy). */
+  var SQV = Object.assign({ g: 1, foe: null, q: '' }, store.get('sqv', {}));
+  function sqvSave() { store.set('sqv', { g: SQV.g, foe: SQV.foe, q: SQV.q }); }
+  var SQ_SIMSL = [200, 500, 1000, 2000];
+  function sqvSims() { var s = +(S.inputs && S.inputs.sqsims) || 1000; return SQ_SIMSL.indexOf(s) >= 0 ? s : 1000; }
+  var SQ_D = { key: null, res: null, busy: false, err: null, at: 0, nonce: 0, pend: false };
+  function sqvFoe() {
+    var all = sqgFoeGroups(), f = null;
+    all.forEach(function (g) { if (!f && sqgKey(g) === SQV.foe) f = g; });
+    return f || sqgChosen()[0] || all[0] || null;
+  }
+  function sqvGroup() { return sqgMyGroups()[(SQV.g || 1) - 1] || []; }
+  function sqvJob() {
+    var foe = sqvFoe(), G = sqvGroup().filter(sqgPlays);
+    if (!foe || !G.length) return null;
+    var E = sqgFoeTeam(foe);
+    if (!E.length) return null;
+    return { kind: 'gbd', mine: G.map(sqgOwnMember), foe: E, sims: sqvSims(), seed: SQ_SEED };
+  }
+  // Runs the one-on-one test when what it depends on changed (like the Arena's plan).
+  function sqvRun() {
+    var job = sqvJob();
+    if (!job) { if (!SQ_D.busy) { SQ_D.key = null; SQ_D.res = null; } return; }
+    var key = JSON.stringify([job.mine, job.foe, job.sims, SQ_D.nonce]);
+    if (key === SQ_D.key) return;
+    if (SQ_D.busy) { SQ_D.pend = true; return; }
+    SQ_D.key = key; SQ_D.busy = true; SQ_D.err = null; SQ_D.res = null; SQ_D.pend = false;
+    var done = function (res, err) {
+      SQ_D.busy = false;
+      if (err || !res) SQ_D.err = String(err || 'no answer'); else { SQ_D.res = res; SQ_D.at = Date.now(); }
+      sqvPanelsRedraw();
+    };
+    var w = wkRun(job, function (m) { if (m.type === 'gbd') done(m.res, null); else if (m.type === 'error') done(null, m.err); });
+    if (!w) setTimeout(function () { try { done(gbDuo(job.mine, job.foe, job.sims, job.seed), null); } catch (e) { done(null, e.message); } }, 30);
+  }
+  function sqvBar(str, max) { var w = max > 0 ? Math.max(3, Math.round(Math.sqrt(str / max) * 100)) : 0; return '<span class="sqbw"><span class="sqbar" style="width:' + w + '%"></span></span>'; }
+  function sqvNum(x) { return String(Math.round(x * 10) / 10); }
+  function sqvBeats(k) { return k === undefined ? '' : '<span class="mu sqbeat" title="' + esc(t('members beaten on average')) + '">' + esc(t('beats {0}', [sqvNum(k)])) + '</span>'; }
+  function sqvMyName() { return typeof arenaMyName === 'function' ? arenaMyName() : null; }
+  function sqvGroupSelect() {
+    var G = sqgMyGroups(), ed = !!SQG.set;
+    return '<select id="f_sqg">' + G.map(function (g, i) {
+      return '<option value="' + (i + 1) + '"' + (i + 1 === (SQV.g || 1) ? ' selected' : '') + '>' + esc(t('Group {0}', [i + 1]) + ' · ' + t('{0} members', [g.length]) + (ed ? ' ' + t('(edited)') : '')) + '</option>';
+    }).join('') + '</select>';
+  }
+  function sqvFoeSelect() {
+    var all = sqgFoeGroups(), cur = sqvFoe(), q = String(SQV.q || '').toLowerCase(), by = {}, sqs = [];
+    all.forEach(function (g) {
+      if (q && (g.sq + ' ' + g.m.join(' ')).toLowerCase().indexOf(q) < 0 && (!cur || sqgKey(g) !== sqgKey(cur))) return;
+      if (!by[g.sq]) { by[g.sq] = []; sqs.push(g.sq); }
+      by[g.sq].push(g);
+    });
+    sqs.sort(function (x, y) { return String(x).toLowerCase() < String(y).toLowerCase() ? -1 : 1; });
+    if (!sqs.length) return '<select id="f_sqfoe" disabled><option>' + esc(t('No enemy group in your battles yet.')) + '</option></select>';
+    return '<select id="f_sqfoe">' + sqs.map(function (s) {
+      return '<optgroup label="' + esc(s) + '">' + by[s].sort(function (a, b) { return a.g - b.g; }).map(function (g) {
+        var k = sqgKey(g);
+        return '<option value="' + esc(k) + '"' + (cur && k === sqgKey(cur) ? ' selected' : '') + '>' + esc(t('G{0}', [g.g]) + ' · ' + g.m.slice(0, 4).join(', ') + (g.m.length > 4 ? '…' : '') + ' · ' + t('updated {0}', [ago(g.t)])) + '</option>';
+      }).join('') + '</optgroup>';
+    }).join('') + '</select>';
+  }
+  function sqvMinePanel(ros, max, res) {
+    var gi = SQV.g || 1, G = sqvGroup(), h = '<div class="card ar"><div class="arh">' + esc(t('My group')) + '</div><div class="arn">' + esc(t('Group {0}', [gi])) + (SQG.set ? ' <span class="mu">' + esc(t('(edited)')) + '</span>' : '') + '</div>';
+    var me = sqvMyName(), k = 0, playing = G.filter(sqgPlays);
+    if (!G.length) h += line(t('(empty)'), 'mu');
+    G.forEach(function (m, i) {
+      var on = sqgPlays(m), x = sqgOwnMember(m), kk = on ? k++ : -1;
+      h += '<div class="sqrow' + (on ? '' : ' off') + '"><button class="sqmv" data-mv="' + esc(m.user) + '|-1"' + (i === 0 ? ' disabled' : '') + ' title="' + esc(t('Fight earlier')) + '">↑</button><button class="sqmv" data-mv="' + esc(m.user) + '|1"' + (i === G.length - 1 ? ' disabled' : '') + ' title="' + esc(t('Fight later')) + '">↓</button>' +
+        '<span class="sqnm"><b>' + (i + 1) + '. ' + esc(m.user) + '</b>' + (m.user === me ? ' <span class="mu">' + esc(t('(you)')) + '</span>' : '') + (on ? '' : ' <span class="mu">(' + esc(t('not ticked to play')) + ')</span>') +
+        '<span class="mu sqst">' + esc(t('{0} damage · {1} HP', [sqgK(m.d), sqgK(m.h * m.N)])) + '</span></span>' + sqvBar(gbStr(x), max) + (res && on ? sqvBeats(res.kM[kk]) : '') +
+        '<button class="sqmv" data-mdel="' + esc(m.user) + '" title="' + esc(t('Remove from the group')) + '">✕</button></div>';
+    });
+    var others = ros.filter(function (m) { return G.indexOf(m) < 0; }), slot = {};
+    sqgMyGroups().forEach(function (g, j) { g.forEach(function (m) { slot[m.user] = j + 1; }); });
+    h += '<select id="f_sqadd"' + (G.length >= GB_SIZE ? ' disabled' : '') + '><option value="">' + esc(G.length >= GB_SIZE ? t('Group full ({0})', [GB_SIZE]) : t('Add a member...')) + '</option>' +
+      others.map(function (m) { return '<option value="' + esc(m.user) + '">' + esc(m.user + ' (' + (slot[m.user] ? t('from group {0}', [slot[m.user]]) : t('bench')) + ')') + '</option>'; }).join('') + '</select>';
+    if (SQG.set) h += '<div class="btns"><button class="sec" id="b_sqvreset">' + esc(t('Back to the groups as they are now')) + '</button></div>';
+    var rosOld = Date.now() - IMP.x.roster.t > 12 * 3600000;
+    h += '<div class="line ' + (rosOld ? 'warn' : 'mu') + '" id="sqros">' + esc(t('Roster: {0} members, as the game sent it {1}.', [ros.length, ago(IMP.x.roster.t)]) + (SQ_ROS.fresh ? ' ' + t('Your own line uses your build loaded {0}.', [ago(SQ_ROS.fresh)]) : '') +
+      (rosOld ? ' ' + t('To refresh it: open Squadron Groups in the game, then send to the planner again.') : '')) + '</div>';
+    var mq = sqgMem();
+    if (mq) h += '<div class="line ' + (mq.gone.length || mq.add.length ? 'warn' : 'mu') + '" id="sqmem">' + esc(t('Squadron: {0} members (list from the game, {1}).', [mq.n, ago(mq.t)]) +
+      (mq.gone.length ? ' ' + t('Left the squadron, not counted: {0}.', [mq.gone.join(', ')]) : '') +
+      (mq.add.length ? ' ' + t('Not in Squadron Groups yet, so no build: {0}.', [mq.add.join(', ')]) : '')) + '</div>';
+    if (G.length && !playing.length) h += line(t('Nobody in this group is ticked to play.'), 'warn');
+    return h + '</div>';
+  }
+  function sqvFoePanel(foe, max, res) {
+    var h = '<div class="card ar"><div class="arh">' + esc(t('Enemy group')) + '</div>';
+    if (!foe) return h + line(t('No enemy group in your battles yet.'), 'warn') + '</div>';
+    h += '<div class="arn">' + esc(foe.sq + ' · ' + t('G{0}', [foe.g])) + '</div>';
+    var k = 0, weak = 0;
+    foe.m.forEach(function (name, i) {
+      var c = vsCard(name), x = c ? sqgFoeMember(name) : null, kk = x ? k++ : -1;
+      var shots = c ? Math.min(c.P ? c.P[2] || 0 : 0, c.E ? c.E[2] || 0 : 0) : 0, doubt = c && !c.mate && shots < 30;
+      if (doubt) weak++;
+      h += '<div class="sqrow' + (c ? '' : ' off') + '"><span class="sqnm"><b>' + (i + 1) + '. ' + esc(name) + '</b>' + (doubt ? ' <span class="warn" title="' + esc(t('Weak estimate: precision and evasion lean on the usual gear split.')) + '">?</span>' : '') +
+        '<span class="mu sqst">' + esc(c ? t('{0} damage · {1} HP', [sqgK(c.d), sqgK(c.h * (c.n || 1))]) + '' : t('no build yet')) + '</span>' + (c && !c.mate ? '<span class="mu sqst">' + esc(t('updated {0}', [plLast(c) ? ago(plLast(c)) : '?'])) + '</span>' : '') + '</span>' +
+        (x ? sqvBar(gbStr(x), max) : '<span class="sqbw"></span>') + (res && x ? sqvBeats(res.kE[kk]) : '') + '</div>';
+    });
+    var old = vsOld(foe.t);
+    h += line(t('Line-up from your last battle with them, {0} · met {1}x.', [ago(foe.t), foe.n]), old ? 'warn' : 'mu');
+    if (old) h += line(t('Old line-up: they may have changed members or builds since.'), 'warn');
+    if (weak) h += line(t('? = weak estimate ({0} of {1} members): few shots seen.', [weak, foe.m.length]), 'mu');
+    return h + '</div>';
+  }
+  function sqvMidPanel(foe, res) {
+    var h = '<div class="card ar mid" id="sqmid"><div class="arh">' + esc(t('Chance to win')) + '</div>';
+    var again = '<div class="vsrow" style="justify-content:center"><button id="b_sqretest" type="button"' + (SQ_D.busy ? ' disabled' : '') + '>' + esc(SQ_D.busy ? t('Testing...') : t('Test again')) + '</button><span class="mu">' + (res && !SQ_D.busy ? esc(t('tested at {0}', [new Date(SQ_D.at).toLocaleTimeString()])) : '') + '</span></div>';
+    if (!foe || !sqvGroup().filter(sqgPlays).length) return h + '<div class="arbig">--</div>' + line(!foe ? t('Pick an enemy group.') : t('Nobody in this group is ticked to play.'), 'mu') + '</div>';
+    if (SQ_D.err) return h + '<div class="arbig">--</div>' + line(t('The test failed: {0}', [SQ_D.err]), 'bad') + again + '</div>';
+    if (!res) return h + '<div class="arbig">--</div>' + line(t('Working out the numbers...'), 'mu') + again + '</div>';
+    var cls = function (p) { return p >= 0.6 ? 'good' : (p <= 0.4 ? 'bad' : ''); };
+    h += '<div class="arcmp arduo"><div><span>' + esc(t('We attack them')) + '</span><b class="' + cls(res.pA) + '">' + sqgShow(res.pA) + '%</b></div>' +
+      '<div><span>' + esc(t('They attack us')) + '</span><b class="' + cls(res.pD) + '">' + sqgShow(res.pD) + '%</b></div></div>';
+    h += line(t('Average {0}% ±{1}', [sqgShow(res.p), Math.max(1, Math.round(res.se * 200))]), 'mu');
+    // The relay: who carries the fight and who is the danger.
+    var G = sqvGroup().filter(sqgPlays), bi = 0, ti = 0, known = foe.m.filter(function (n) { return !!vsCard(n); });
+    res.kM.forEach(function (x, i) { if (x > res.kM[bi]) bi = i; });
+    res.kE.forEach(function (x, i) { if (x > res.kE[ti]) ti = i; });
+    var rl = '';
+    if (G[bi] && res.kM[bi] >= 0.1) rl += line(t('Your best: #{0} {1} beats {2} of theirs on average.', [sqvGroup().indexOf(G[bi]) + 1, G[bi].user, sqvNum(res.kM[bi])]), 'good');
+    if (known[ti] && res.kE[ti] >= 0.1) rl += line(t('Their danger: #{0} {1} beats {2} of yours on average.', [foe.m.indexOf(known[ti]) + 1, known[ti], sqvNum(res.kE[ti])]), 'bad');
+    rl += line(t('On average you lose {0} of {1} members, they lose {2} of {3}.', [sqvNum(res.lostM), G.length, sqvNum(res.lostE), known.length]), 'mu');
+    h += '<div class="sqrelay">' + rl + '</div>';
+    if (known.length < foe.m.length) h += line(t('{0} of their members have no build yet and are left out.', [foe.m.length - known.length]), 'warn');
+    h += line(t('{0} simulated fights, half attacking, half defending · {1} rounds on average', [grp(res.n), Math.round(res.rounds || 0)]), 'mu');
+    return h + again + '</div>';
+  }
+  function sqvZonesPanel() {
+    var h = '<div class="card ar" id="sqzones"><div class="arh">' + esc(t('Zones')) + '</div>';
+    var z = sqgZoneRows();
+    if (!z) return h + line(t('No map yet: it fills by itself when the Battlefield map is open in the game with PvP Meta, or from the cloud.'), 'mu') + '</div>';
+    var foes = {}, cur = sqvFoe(), ck = cur ? sqgKey(cur) : '';
+    sqgFoeGroups().forEach(function (g) { foes[sqgKey(g)] = 1; });
+    h += '<div class="arn">' + esc(t('Zones on the map ({0}, {1})', [z.rows.length, ago(z.t)])) + '</div>';
+    h += '<div class="scrolly" style="max-height:420px"><table class="t zt"><thead><tr><th>' + [t('Zone'), t('Held by'), t('Defenders'), t('Strength vs our best group'), t('Under attack by')].map(esc).join('</th><th>') + '</th></tr></thead><tbody>' +
+      z.rows.map(function (r) {
+        var k = r.sq + '|' + r.g, can = !!foes[k];
+        return '<tr' + (can ? ' data-zone="' + esc(k) + '" class="zcan' + (k === ck ? ' zcur' : '') + '" title="' + esc(t('Load this holder as the enemy')) + '"' : '') + '>' +
+          r.cells.map(function (c, i) { var o = typeof c === 'object' ? c : { t: c }; return '<td class="' + esc(o.c || '') + '">' + (i === 1 && can ? '▶ ' : '') + esc(o.t) + '</td>'; }).join('') + '</tr>';
+      }).join('') + '</tbody></table></div>';
+    h += line(t('▶ = we have their line-up: click the zone to see your chance against its holder.'), 'mu');
+    h += line(t('Strength: the game\'s own score (damage x HP x clones^2 of the holders), the one behind its "far below these defenders" warning. It leaves out precision and evasion.'), 'mu');
+    return h + '</div>';
+  }
   // Every held zone from the newest map with a strength (1.11.0): the game's own roster
   // power score of the holders (log10), shown as a share of our strongest group's.
-  function sqgZones() {
+  function sqgZoneRows() {
     var maps = ARCH && ARCH.maps ? ARCH.maps : [];
-    if (!maps.length) return '';
+    if (!maps.length) return null;
     // The newest map (pushes carry no strength): a zone's strength comes from the newest
     // snapshot that had one, while the same squadron group still holds that zone.
     var m = maps[maps.length - 1], ros = sqgRoster(), ours = 0, pw = {};
@@ -4020,31 +4258,59 @@
     ros.forEach(function (r) { var g = r.g || 0; if (!g || r.active === false) return; gs[g] = (gs[g] || 0) + (r.d || 0) * (r.N || 1) * (r.h || 0) * (r.N || 1); });
     Object.keys(gs).forEach(function (g) { ours = Math.max(ours, gs[g]); });
     var rows = m.tiles.filter(function (z) { return z[2]; }).sort(function (a, b) { return (b[5] || 0) - (a[5] || 0); }).map(function (z) {
-      var rel = ours > 0 && z[5] !== null ? Math.pow(10, z[5]) / ours : null;
-      return [z[0] + ',' + z[1], z[2] + (z[3] ? ' ' + t('G{0}', [z[3]]) : ''), z[4] !== null ? String(z[4]) : '–',
-        { t: rel === null ? '–' : (rel >= 10 ? 'x' + Math.round(rel) : 'x' + (Math.round(rel * 100) / 100)), c: rel === null ? 'mu' : (rel > 1.5 ? 'bad' : (rel < 0.67 ? 'good' : '')) },
-        z[7] ? t('{0} G{1}', [z[7], z[8] || '?']) + (z[9] ? ' ' + new Date(z[9]).toLocaleTimeString() : '') : ''];
+      var rel = ours > 0 && z[5] !== null && z[5] !== undefined ? Math.pow(10, z[5]) / ours : null;
+      return { sq: z[2], g: z[3], cells: [z[0] + ',' + z[1], z[2] + (z[3] ? ' ' + t('G{0}', [z[3]]) : ''), z[4] !== null && z[4] !== undefined ? String(z[4]) : '–',
+        { t: rel === null ? '–' : (rel >= 10 ? 'x' + Math.round(rel) : (rel < 0.01 ? '<x0.01' : 'x' + (Math.round(rel * 100) / 100))), c: rel === null ? 'mu' : (rel > 1.5 ? 'bad' : (rel < 0.67 ? 'good' : '')) },
+        z[7] ? t('{0} G{1}', [z[7], z[8] || '?']) + (z[9] ? ' ' + new Date(z[9]).toLocaleTimeString() : '') : ''] };
     });
-    if (!rows.length) return '';
-    return '<details class="more" data-fold="zones"' + (SQ_OPEN.zones || (typeof ALLTABS !== 'undefined' && ALLTABS) ? ' open' : '') + '><summary>' + esc(t('Zones on the map ({0}, {1})', [rows.length, ago(m.t)])) + '</summary>' +
-      tbl([t('Zone'), t('Held by'), t('Defenders'), t('Strength vs our best group'), t('Under attack by')], rows) +
-      line(t('Strength: the game\'s own score (damage x HP x clones^2 of the holders), the one behind its "far below these defenders" warning. It leaves out precision and evasion.'), 'mu') + '</details>';
+    return rows.length ? { t: m.t, rows: rows } : null;
+  }
+  // The three top panels: drawn on their own when a test result arrives, so the rest of
+  // the tab (and a click in it) is left alone.
+  function sqvPanels() {
+    sqvRun();
+    var foe = sqvFoe(), res = SQ_D.busy ? null : SQ_D.res, max = 0;
+    sqvGroup().forEach(function (m) { max = Math.max(max, gbStr(sqgOwnMember(m))); });
+    if (foe) sqgFoeTeam(foe).forEach(function (x) { max = Math.max(max, gbStr(x)); });
+    return sqvMinePanel(sqgRoster(), max, res) + sqvMidPanel(foe, res) + sqvFoePanel(foe, max, res);
+  }
+  function sqvPanelsRedraw() {
+    var box = root.querySelector('#sqpan');
+    if (!box) { renderSq(); return; }
+    box.innerHTML = sqvPanels();
+    sqvWire(box);
+  }
+  function sqvWire(box) {
+    if (!box) return;
+    var byUser = {};
+    sqgRoster().forEach(function (m) { byUser[m.user] = m; });
+    function without(G, u) { return G.map(function (g) { return g.filter(function (m) { return m.user !== u; }); }); }
+    var rt = box.querySelector('#b_sqretest'); if (rt) rt.addEventListener('click', function () { SQ_D.nonce++; sqvPanelsRedraw(); });
+    // my group, edited in place
+    box.querySelectorAll('button[data-mv]').forEach(function (c) {
+      c.addEventListener('click', function () {
+        var p = c.getAttribute('data-mv').split('|'), u = p.slice(0, -1).join('|'), d = +p[p.length - 1], G = sqgMyGroups(), g = G[(SQV.g || 1) - 1], i = g.indexOf(byUser[u]), j = i + d;
+        if (i < 0 || j < 0 || j >= g.length) return;
+        g.splice(i, 1); g.splice(j, 0, byUser[u]); sqgWrite(G);
+      });
+    });
+    box.querySelectorAll('button[data-mdel]').forEach(function (c) { c.addEventListener('click', function () { sqgWrite(without(sqgMyGroups(), c.getAttribute('data-mdel'))); }); });
+    var ad = box.querySelector('#f_sqadd');
+    if (ad) ad.addEventListener('change', function () {
+      if (!ad.value) return;
+      var gi = (SQV.g || 1) - 1, G = without(sqgMyGroups(), ad.value);
+      if (G[gi].length < GB_SIZE) G[gi].push(byUser[ad.value]);
+      sqgWrite(G);
+    });
+    var vr = box.querySelector('#b_sqvreset'); if (vr) vr.addEventListener('click', function () { SQG.set = null; SQ_MY = null; SQ_MYMSG = ''; sqgSave(); renderSq(); });
   }
   function renderSq() {
     var el = root.querySelector('#sqbody');
     if (!el) return;
     var ros = sqgRoster(), h = '';
     if (!IMP) { el.innerHTML = line(t('No fights yet: bring them in on the Import tab.'), 'warn'); return; }
-    if (!ros.length) { el.innerHTML = line(t('No roster yet: open Squadron Groups once in the game, then send to the planner again.'), 'warn'); return; }
-    var all = typeof ALLTABS !== 'undefined' && ALLTABS, rosOld = Date.now() - IMP.x.roster.t > 12 * 3600000;
-    h += '<div class="line ' + (rosOld ? 'warn' : 'mu') + '" id="sqros">' + esc(t('Roster: {0} members, as the game sent it {1}.', [ros.length, ago(IMP.x.roster.t)]) + (SQ_ROS.fresh ? ' ' + t('Your own line uses your build loaded {0}.', [ago(SQ_ROS.fresh)]) : '') +
-      (rosOld ? ' ' + t('To refresh it: open Squadron Groups in the game, then send to the planner again.') : '')) + '</div>';
-    var zones = sqgZones();
-    if (zones) h += zones;
-    var mq = sqgMem();
-    if (mq) h += '<div class="line ' + (mq.gone.length || mq.add.length ? 'warn' : 'mu') + '" id="sqmem">' + esc(t('Squadron: {0} members (list from the game, {1}).', [mq.n, ago(mq.t)]) +
-      (mq.gone.length ? ' ' + t('Left the squadron, not counted: {0}.', [mq.gone.join(', ')]) : '') +
-      (mq.add.length ? ' ' + t('Not in Squadron Groups yet, so no build: {0}.', [mq.add.join(', ')]) : '')) + '</div>';
+    if (!ros.length) { el.innerHTML = line(t('No roster yet: open Squadron Groups once in the game, then send to the planner again.'), 'warn') + '<div class="argrid ar2">' + sqvZonesPanel() + '</div>'; wireZones(); return; }
+    var all = typeof ALLTABS !== 'undefined' && ALLTABS;
     function fold(key, title, body) { return '<details class="more" data-fold="' + key + '"' + (SQ_OPEN[key] || all ? ' open' : '') + '><summary>' + esc(title) + '</summary>' + body + '</details>'; }
     function groupsTbl(res) {
       return tbl([t('Group'), t('Members (1 fights first)')], res.groups.map(function (G, i) {
@@ -4052,50 +4318,56 @@
         return [t('Group {0}', [i + 1]), { t: G.map(function (m, k) { return (k + 1) + '. ' + m.name; }).join('   ') || t('(empty)'), c: was === null || was === is ? '' : 'good' }];
       }).concat(res.bench.length ? [[t('Bench'), res.bench.map(function (m) { return m.name; }).join(', ')]] : []));
     }
-    // 1. the enemy
-    var foes = sqgFoeGroups(), chosen = sqgChosen().map(sqgKey);
-    h += sect(t('Win against (tick up to 3 enemy groups)'));
-    if (!foes.length) h += line(t('No enemy group in your battles yet.'), 'warn');
-    else h += '<div class="card wide scrolly" style="max-height:260px"><table class="t pick"><thead><tr><th></th><th>' + esc(t('Group')) + '</th><th>' + esc(t('Members, in fight order')) + '</th><th>' + esc(t('Met')) + '</th><th>' + esc(t('Last seen')) + '</th></tr></thead><tbody>' +
+    // 1. the pickers, as on the Arena tab
+    var sims = sqvSims(), foe = sqvFoe();
+    h += '<div class="arsel">' +
+      '<label><b>' + esc(t('My group')) + '</b>' + sqvGroupSelect() + '</label>' +
+      '<label class="foe"><b>' + esc(t('Enemy group')) + '</b><input type="search" id="f_sqq" value="' + esc(SQV.q || '') + '" placeholder="' + esc(t('search squadron or member')) + '"><span id="sqfoe">' + sqvFoeSelect() + '</span></label>' +
+      '<label><b>' + esc(t('Simulations')) + '</b><select id="f_sqsims">' + SQ_SIMSL.map(function (n) { return '<option value="' + n + '"' + (n === sims ? ' selected' : '') + '>' + grp(n) + '</option>'; }).join('') + '</select></label></div>';
+    // 2. my group | the chance | the enemy group
+    h += '<div class="argrid ar1" id="sqpan">' + sqvPanels() + '</div>';
+    // 3. best groups | zones
+    var foes = sqgFoeGroups(), chosen = sqgChosen().map(sqgKey), b = '<div class="card ar"><div class="arh">' + esc(t('Best groups')) + '</div>';
+    b += line(t('Tick up to 3 enemy groups: the planner splits your members into groups and orders them to beat those.'), 'mu');
+    if (!foes.length) b += line(t('No enemy group in your battles yet.'), 'warn');
+    else b += '<div class="scrolly" style="max-height:220px"><table class="t pick"><thead><tr><th></th><th>' + esc(t('Group')) + '</th><th>' + esc(t('Members, in fight order')) + '</th><th>' + esc(t('Met')) + '</th><th>' + esc(t('Last seen')) + '</th></tr></thead><tbody>' +
       foes.slice(0, 60).map(function (g) {
         var k = sqgKey(g);
         return '<tr><td><input type="checkbox" data-foe="' + esc(k) + '"' + (chosen.indexOf(k) >= 0 ? ' checked' : '') + '></td><td><b>' + esc(sqgFoeName(g)) + '</b></td><td>' + esc(g.m.join(', ')) + '</td><td>' + g.n + 'x</td><td>' + esc(whenTxt(g.t)) + '</td></tr>';
       }).join('') + '</tbody></table></div>';
-    // 2. the answer
-    h += '<div class="btns"><button class="pri" id="b_sqrun"' + (SQ_BUSY ? ' disabled' : '') + '>' + esc(SQ_BUSY ? t('Working...') : t('Suggest groups for me')) + '</button>' +
+    b += '<div class="btns"><button class="pri" id="b_sqrun"' + (SQ_BUSY ? ' disabled' : '') + '>' + esc(SQ_BUSY ? t('Working...') : t('Suggest groups for me')) + '</button>' +
       '<button class="sec" id="b_sqmy"' + (SQ_MYBUSY ? ' disabled' : '') + '>' + esc(SQ_MYBUSY ? t('Working...') : t('Check my groups')) + '</button></div>';
-    h += '<div class="line" id="sqmsg">' + esc(SQ_MSG) + '</div>';
-    h += '<div class="line" id="sqmymsg">' + esc(SQ_MYMSG) + '</div>';
-    h += sqgMine();
+    b += '<div class="line" id="sqmsg">' + esc(SQ_MSG) + '</div>';
+    b += '<div class="line" id="sqmymsg">' + esc(SQ_MYMSG) + '</div>';
+    b += sqgMine();
     if (SQ_RES) {
       var r = SQ_RES.res, f = SQ_RES.foes, head = [t('Your group')].concat(f.map(sqgFoeName)).concat([t('Average')]);
-      h += sect(t('Suggested groups, in fight order')) + groupsTbl(r);
-      h += sect(t('Win chance, suggested groups')) + sqgMatrix(head, r.matrix, function (i) { return t('Group {0}', [i + 1]); });
-      h += fold('now', t('Compare with the groups as they are now'), sqgMatrix(head, r.now, function (i) { return t('Group {0}', [i + 1]) + ' ' + t('now'); }));
+      b += sect(t('Suggested groups, in fight order')) + groupsTbl(r);
+      b += sect(t('Win chance, suggested groups')) + sqgMatrix(head, r.matrix, function (i) { return t('Group {0}', [i + 1]); });
+      b += fold('now', t('Compare with the groups as they are now'), sqgMatrix(head, r.now, function (i) { return t('Group {0}', [i + 1]) + ' ' + t('now'); }));
       var gain = Math.round(r.gain * 100);
-      h += line(gain > 0 ? t('The suggested groups: +{0} points of average win chance over the current ones.', [gain]) : t('Your current groups are already as good as anything found.'), gain > 0 ? 'good' : 'mu');
-      h += line(t('In brackets: attacking / defending. ± is the doubt left by luck and by the estimates of the enemy.'), 'mu');
-      if (r.partial) h += line(t('Big roster: the search was stopped after {0} seconds, so this is the best found so far. Run it again to look further from your current groups.', [r.secs]), 'warn');
-      h += '<div class="btns"><button class="sec" id="b_sqcopy">' + esc(t('Copy for chat')) + '</button><button class="sec" id="b_sqtake">' + esc(t('Edit these groups myself')) + '</button></div>';
-      h += '<textarea id="sqtxt" readonly style="position:absolute;left:-9999px;top:0;width:10px;height:10px">' + esc(sqgText(SQ_RES)) + '</textarea>';
+      b += line(gain > 0 ? t('The suggested groups: +{0} points of average win chance over the current ones.', [gain]) : t('Your current groups are already as good as anything found.'), gain > 0 ? 'good' : 'mu');
+      b += line(t('In brackets: attacking / defending. ± is the doubt left by luck and by the estimates of the enemy.'), 'mu');
+      if (r.partial) b += line(t('Big roster: the search was stopped after {0} seconds, so this is the best found so far. Run it again to look further from your current groups.', [r.secs]), 'warn');
+      b += '<div class="btns"><button class="sec" id="b_sqcopy">' + esc(t('Copy for chat')) + '</button><button class="sec" id="b_sqtake">' + esc(t('Edit these groups myself')) + '</button></div>';
+      b += '<textarea id="sqtxt" readonly style="position:absolute;left:-9999px;top:0;width:10px;height:10px">' + esc(sqgText(SQ_RES)) + '</textarea>';
     }
-    // 3. who plays
     var nplay = ros.filter(sqgPlays).length;
-    h += fold('ros', t('Who plays ({0} of {1})', [nplay, ros.length]),
-      '<div class="card wide"><table class="t pick"><thead><tr><th>' + esc(t('Plays')) + '</th><th>' + esc(t('Member')) + '</th><th>' + esc(t('Now')) + '</th><th>' + esc(t('Damage')) + '</th><th>' + esc(t('Health')) + '</th><th>' + esc(t('Precision')) + '</th><th>' + esc(t('Evasion')) + '</th><th>' + esc(t('Skills')) + '</th></tr></thead><tbody>' +
-      ros.slice().sort(function (a, b) { return (a.g || 9) - (b.g || 9) || a.pos - b.pos; }).map(function (m) {
+    b += fold('ros', t('Who plays ({0} of {1})', [nplay, ros.length]),
+      '<div class="scrolly"><table class="t pick"><thead><tr><th>' + esc(t('Plays')) + '</th><th>' + esc(t('Member')) + '</th><th>' + esc(t('Now')) + '</th><th>' + esc(t('Damage')) + '</th><th>' + esc(t('Health')) + '</th><th>' + esc(t('Precision')) + '</th><th>' + esc(t('Evasion')) + '</th><th>' + esc(t('Skills')) + '</th></tr></thead><tbody>' +
+      ros.slice().sort(function (a, b2) { return (a.g || 9) - (b2.g || 9) || a.pos - b2.pos; }).map(function (m) {
         return '<tr><td><input type="checkbox" data-play="' + esc(m.user) + '"' + (sqgPlays(m) ? ' checked' : '') + (sqgGone(m.user) ? ' disabled' : '') + '></td><td><b>' + esc(m.user) + '</b>' + (sqgGone(m.user) ? ' <span class="warn">(' + esc(t('left the squadron')) + ')</span>' : (m.active ? '' : ' <span class="mu">(' + esc(t('inactive')) + ')</span>')) + '</td><td>' + (m.g ? 'G' + m.g + ' #' + m.pos : esc(t('free'))) +
           '</td><td>' + grp(m.d) + '</td><td>' + grp(m.h) + '</td><td>' + grp(Math.round(m.tot.precision)) + '</td><td>' + grp(Math.round(m.tot.evasion)) + '</td><td>' + esc(skTxt(m.sk)) + '</td></tr>';
       }).join('') + '</tbody></table></div>' +
       line(t('Untick whoever will not be there. The members and their builds come from the game page, read by the PvP Meta script or the PvP Planner button, and are shared with everyone through the cloud: the newest one wins. The API key only brings your own build.'), 'mu'));
-    // 4. my own groups
     var own = line(t('Move members between groups here, then click Check my groups above. Nothing changes in the game.'), 'mu') + sqgBuilder() +
       '<div class="btns"><button class="sec" id="b_sqreset">' + esc(t('Reset to the groups as they are now')) + '</button></div>';
-    h += fold('own', t('Change my groups'), own);
+    b += fold('own', t('Change all 3 groups'), own);
+    b += '</div>';
+    h += '<div class="argrid ar2">' + b + sqvZonesPanel() + '</div>';
     function sqgMine() {
       var own = '';
       if (!SQ_MY) return '';
-      {
       var my = SQ_MY.res, mf = SQ_MY.foes, mhead = [t('Your group')].concat(mf.map(sqgFoeName)).concat([t('Average')]);
       own += sect(t('Your groups, as tested')) + groupsTbl(my);
       own += sect(t('Win chance, your team')) + sqgMatrix(mhead, my.matrix, function (i) { return t('Group {0}', [i + 1]); });
@@ -4107,11 +4379,27 @@
         (d < 0 ? t('Your team: {0} points of average win chance under the groups as they are now.', [d]) : t('Your team: about the same as the groups as they are now.')), d > 0 ? 'good' : (d < 0 ? 'bad' : 'mu'));
       own += '<div class="btns"><button class="sec" id="b_sqmycopy">' + esc(t('Copy for chat')) + '</button></div>';
       own += '<textarea id="sqmytxt" readonly style="position:absolute;left:-9999px;top:0;width:10px;height:10px">' + esc(sqgText(SQ_MY)) + '</textarea>';
-      }
       return own;
     }
+    // Keep the search box's focus and caret across a redraw (the result arrives while typing).
+    var act = document.activeElement && root.contains(document.activeElement) && document.activeElement.id === 'f_sqq' ? document.activeElement.selectionStart : null;
+    var sy = window.scrollY;
     el.innerHTML = h;
+    if (act !== null) { var qi0 = el.querySelector('#f_sqq'); qi0.focus(); try { qi0.setSelectionRange(act, act); } catch (e) {} }
+    if (Math.abs(window.scrollY - sy) > 2) window.scrollTo(0, sy);
     el.querySelectorAll('details[data-fold]').forEach(function (d) { d.addEventListener('toggle', function () { SQ_OPEN[d.getAttribute('data-fold')] = d.open; }); });
+    // the pickers
+    el.querySelector('#f_sqg').addEventListener('change', function () { SQV.g = +el.querySelector('#f_sqg').value; sqvSave(); renderSq(); });
+    function wireFoe() { var s = el.querySelector('#f_sqfoe'); if (s && !s.disabled) s.addEventListener('change', function () { SQV.foe = s.value; sqvSave(); renderSq(); }); }
+    wireFoe();
+    var qi = el.querySelector('#f_sqq');
+    qi.addEventListener('input', function () { SQV.q = qi.value; sqvSave(); el.querySelector('#sqfoe').innerHTML = sqvFoeSelect(); wireFoe(); });
+    el.querySelector('#f_sqsims').addEventListener('change', function () { S.inputs.sqsims = +el.querySelector('#f_sqsims').value; saveInputs(); renderSq(); });
+    var byUser = {};
+    ros.forEach(function (m) { byUser[m.user] = m; });
+    function without(G, u) { return G.map(function (g) { return g.filter(function (m) { return m.user !== u; }); }); }
+    sqvWire(el.querySelector('#sqpan'));
+    wireZones();
     el.querySelectorAll('input[data-play]').forEach(function (c) {
       c.addEventListener('change', function () { var u = c.getAttribute('data-play'), m = ros.filter(function (x) { return x.user === u; })[0]; if (c.checked === m.active) delete SQG.off[u]; else SQG.off[u] = !c.checked; sqgSave(); SQ_OPEN.ros = true; renderSq(); });
     });
@@ -4123,10 +4411,7 @@
         SQG.foes = keys.slice(-3); sqgSave(); renderSq();
       });
     });
-    var b = el.querySelector('#b_sqrun'); if (b) b.addEventListener('click', sqgRun);
-    var byUser = {};
-    ros.forEach(function (m) { byUser[m.user] = m; });
-    function without(G, u) { return G.map(function (g) { return g.filter(function (m) { return m.user !== u; }); }); }
+    var bb = el.querySelector('#b_sqrun'); if (bb) bb.addEventListener('click', sqgRun);
     el.querySelectorAll('select[data-add]').forEach(function (c) {
       c.addEventListener('change', function () {
         if (!c.value) return;
@@ -4161,6 +4446,14 @@
         try { navigator.clipboard.writeText(ta.value).then(function () { cp.textContent = t('Copied'); }, function () { document.execCommand('copy'); cp.textContent = t('Copied'); }); } catch (e) { document.execCommand('copy'); cp.textContent = t('Copied'); }
       });
     });
+    function wireZones() {
+      el.querySelectorAll('tr[data-zone]').forEach(function (tr) {
+        tr.addEventListener('click', function () {
+          SQV.foe = tr.getAttribute('data-zone'); SQV.q = ''; sqvSave(); renderSq();
+          var top = el.querySelector('.arsel'); if (top && top.scrollIntoView) top.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      });
+    }
   }
 
   /* ============================================================
@@ -4994,6 +5287,7 @@
     '.tabp>*+*{margin-top:14px}details.more>summary{cursor:pointer;font-weight:600;font-size:14px;color:var(--tx)}details.more[open]>summary{margin-bottom:10px}details.more:not(.box){margin-top:12px}.vsrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.vsrow b{font-size:15px}.vsrow select{flex:1 1 260px;max-width:460px;font-size:14px;min-height:38px}' +
     '.arsel{display:grid;grid-template-columns:1fr 2fr auto;gap:12px;align-items:end}.arsel label{display:flex;flex-direction:column;gap:4px}.arsel select,.arsel input{font-size:14px;min-height:36px;width:100%}.arsel .foe input{margin-bottom:4px}' +
     '.argrid{display:grid;gap:12px;margin-top:12px}.argrid.ar1{grid-template-columns:1fr 1fr 1fr}.argrid.ar2{grid-template-columns:1fr 1fr}.card.ar{padding:12px}.arh{font-size:12px;text-transform:uppercase;letter-spacing:.06em;opacity:.7;margin-bottom:6px}.arn{font-weight:700;font-size:15px;margin-bottom:6px}.arbig{font-size:44px;font-weight:800;line-height:1.1;margin:6px 0}.card.ar.mid{text-align:center}.arcmp{display:flex;gap:10px;justify-content:center;margin:8px 0}.arcmp>div{flex:1;max-width:150px;border:1px solid var(--bd,#3333);border-radius:8px;padding:6px}.arcmp span{display:block;font-size:11px;opacity:.7}.arcmp b{font-size:20px}.arcmp em{display:block;font-size:11px;font-style:normal;opacity:.75}.argear span{display:block;font-size:12px;opacity:.85}' +
+    '.sqrow{display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--bd)}.sqrow.off{opacity:.55}.sqnm{flex:1 1 auto;min-width:0;overflow:hidden}.sqnm b{white-space:nowrap}.sqst{display:block;font-size:11px}.sqbw{flex:0 0 72px;height:7px;background:rgba(127,127,127,.22);border-radius:4px;overflow:hidden}.sqbar{display:block;height:100%;background:var(--ac);border-radius:4px}.sqbeat{font-size:11px;white-space:nowrap}.sqmv{padding:0 7px;min-height:26px;line-height:1}#f_sqadd{width:100%;margin-top:8px;min-height:34px}.arduo b{font-size:34px}.sqrelay{text-align:left;margin:8px 0}table.zt tr.zcan{cursor:pointer}table.zt tr.zcan:hover td{background:var(--tile)}table.zt tr.zcur td{font-weight:700}' +
     '@media (max-width:900px){.arsel{grid-template-columns:1fr}.argrid.ar1,.argrid.ar2{grid-template-columns:1fr}}',
     '.pick tbody tr{cursor:pointer}.pick tbody tr:hover td{background:rgba(127,160,200,.12)}',
     '.filebtn{position:relative;overflow:hidden;display:inline-block}.filebtn input{position:absolute;inset:0;opacity:0;cursor:pointer}',
