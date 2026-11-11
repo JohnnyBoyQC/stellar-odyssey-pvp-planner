@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Stellar Odyssey – PvP Meta
 // @namespace    stellarodyssey-pvpmeta
-// @version      1.5.0
-// @description  Arena build planner for Stellar Odyssey: the meta split at your own total stat, the best free re-spec, which upgrades pay, and a record of your duels. Built from Astrolabe 3.22.9's simulator. Keeps the squadron battles, arena duels and roster you browse, and opens them in the web planner in one click (player and squadron picker). Reads the page only: no network requests, no game actions. On the planner page it only hands new data over from the game tab.
+// @version      1.6.0
+// @description  Arena build planner for Stellar Odyssey: the meta split at your own total stat, the best free re-spec, which upgrades pay, and a record of your duels. Built from Astrolabe 3.22.9's simulator. Keeps the squadron battles, arena duels and roster you browse, and opens them in the web planner in one click (player and squadron picker). Reads the page only: no requests to the game, no game actions. Optional: sends what it keeps to the planner's own shared store. On the planner page it only hands new data over from the game tab.
 // @match        *://steam.stellarodyssey.app/*
 // @match        https://johnnyboyqc.github.io/stellar-odyssey-pvp-planner/*
 // @grant        GM_getValue
@@ -11,6 +11,8 @@
 // @grant        GM_listValues
 // @grant        GM_deleteValue
 // @grant        unsafeWindow
+// @grant        GM_xmlhttpRequest
+// @connect      sopvp-planner.stellar-pvp.workers.dev
 // @run-at       document-start
 // @homepageURL  https://github.com/JohnnyBoyQC/stellar-odyssey-pvp-planner
 // @downloadURL  https://raw.githubusercontent.com/JohnnyBoyQC/stellar-odyssey-pvp-planner/main/pvp-meta.user.js
@@ -29,9 +31,11 @@
      the duel recorder are Astrolabe's own functions, copied unchanged by a
      build step; only this panel around them is new.
 
-     It reads the game page and nothing else: no network request of any
-     kind, no clicks, no game actions (the game's rules allow scripts for
-     information and display only).
+     It reads the game page and makes no request to the game, no clicks and
+     no game actions (the game's rules allow scripts for information and
+     display only). Its only network use is opt-in: with "Send to the shared
+     store directly" ticked, it sends what it kept to the planner's own
+     shared store (1.6.0).
      ============================================================ */
 
   /* ---- on the planner page: only the live hand-over (1.5.0) ----
@@ -116,7 +120,8 @@
     keepBadges: 0,      // PvP badges the upgrade plan must leave untouched
     bestGap: 2,         // floor on the gain worth a change; the real bar is twice the error bar
     archive: true,      // keep squadron battles, arena duels, roster and map as they are browsed
-    live: false         // hand new items to an open planner tab (1.5.0); off until the player ticks it
+    live: false,        // hand new items to an open planner tab (1.5.0); off until the player ticks it
+    direct: false       // send straight to the planner's shared store (1.6.0); off until the player ticks it
   };
 
   var S = {
@@ -1208,6 +1213,99 @@
     if (bsub === 'best') return h + renderBest(pv, plan) + plRow();
     if (bsub === 'up') return h + renderUp(pv, plan) + plRow();
     return h + renderCur(pv, plan) + plRow();
+  }
+
+  /* ============================================================
+     STRAIGHT TO THE SHARED STORE (1.6.0, opt-in)
+
+     With "Send to the shared store directly" ticked in Settings, what this
+     game tab keeps (squadron battles, duels, Arena results, Squadron Groups,
+     member list, Rankings / profiles / squadron list, map) is sent to the
+     planner's own shared store (our Cloudflare Worker, never the game), with
+     no planner tab needed. Only what the store has not confirmed yet is sent;
+     the store answers with what it took, and the rest is tried again later.
+     Nothing goes to the game's servers, and no game action is made.
+     ============================================================ */
+
+  var CL_URL = 'https://sopvp-planner.stellar-pvp.workers.dev/add';
+  var DIRECT = { busy: false, dirty: true, last: 0, ok: 0, err: null, sent: 0, wait: 0 };
+  function directOn() { return S.inputs.direct === true && typeof GM_xmlhttpRequest === 'function'; }
+  function directSent() { var s = store.get('sent', null) || {}; ['b', 'd', 'r', 'l', 'm', 'x', 't'].forEach(function (k) { if (!s[k]) s[k] = {}; }); return s; }
+  function directPost(body) {
+    return new Promise(function (ok, no) {
+      try {
+        GM_xmlhttpRequest({ method: 'POST', url: CL_URL, data: JSON.stringify(body), timeout: 60000,
+          headers: { 'Content-Type': 'application/json', 'X-SOPVP-Client': 'pvpmeta' },
+          onload: function (r) { if (r.status < 200 || r.status >= 300) { no(new Error('HTTP ' + r.status)); return; } try { ok(JSON.parse(r.responseText)); } catch (e) { no(e); } },
+          onerror: function () { no(new Error('network')); }, ontimeout: function () { no(new Error('timeout')); } });
+      } catch (e) { no(e); }
+    });
+  }
+  function directPush() {
+    if (!directOn() || DIRECT.busy) return Promise.resolve();
+    DIRECT.busy = true; DIRECT.dirty = false; DIRECT.last = Date.now();
+    return plPayload().then(function (obj) {
+      var sent = directSent(), raw = obj.raw || {};
+      var squad = (raw.squad || []).filter(function (x) { return x.battle && x.battle._id && !sent.b[x.battle._id]; });
+      var recs = (obj.duels || []).filter(function (r) { return r && r.nm && r.o && r.e && !sent.d[r.i || arKey(r)]; });
+      var roster = (raw.roster || []).filter(function (r) { return r.body && !sent.r[r.t]; });
+      var dlist = (raw.dlist || []).filter(function (r) { return r.i && !sent.l[r.i]; });
+      var members = (raw.members || []).filter(function (r) { return !sent.m[r.sq + '|' + r.t]; });
+      var dir = (raw.dir || []).filter(function (e) { return !(sent.x[e.k + '|' + e.id] >= e.t); });
+      var map = (raw.map || []).filter(function (m) { return !sent.t[m.t]; });
+      // Batches under the store's limits, battles first.
+      var mk = function () { return { realm: REALM, squad: [], recs: [], roster: [], dlist: [], members: [], dir: [], map: [] }; };
+      var LIM = { squad: 300, recs: 300, roster: 30, dlist: 1500, members: 8, dir: 3000, map: 150 };
+      var batches = [], cur = mk(), size = 0;
+      function put(kind, x) {
+        var n = JSON.stringify(x).length;
+        if (cur[kind].length >= LIM[kind] || (size + n > 3 * 1024 * 1024 && size > 0)) { batches.push(cur); cur = mk(); size = 0; }
+        cur[kind].push(x); size += n;
+      }
+      squad.forEach(function (x) { put('squad', { battle: x.battle }); });
+      roster.forEach(function (r) { put('roster', { t: r.t, body: r.body }); });
+      recs.forEach(function (r) { put('recs', r); });
+      dlist.forEach(function (r) { put('dlist', { i: r.i, t: r.t, a: r.a, d: r.d, ae: r.ae, de: r.de, dl: r.dl, w: r.w }); });
+      members.forEach(function (r) { put('members', { t: r.t, sq: r.sq, names: r.names }); });
+      dir.forEach(function (e) { put('dir', { k: e.k, id: e.id, t: e.t, f: e.f }); });
+      map.forEach(function (m) { put('map', { t: m.t, tiles: m.tiles }); });
+      if (size > 0) batches.push(cur);
+      DIRECT.wait = squad.length + recs.length + roster.length + dlist.length + members.length + dir.length + map.length;
+      return batches.reduce(function (p, B) {
+        return p.then(function () {
+          return directPost(B).then(function (res) {
+            var acc = (res && res.acc) || {}, rej = (res && res.rej) || {};
+            function done(k) { var o = {}; (acc[k] || []).concat(rej[k] || []).forEach(function (v) { o[String(v)] = 1; }); return o; }
+            var ab = done('b'), ad = done('d'), ar = done('r'), al = done('l'), am = done('m'), ax = done('x'), at = done('t');
+            B.squad.forEach(function (x) { if (ab[x.battle._id]) { sent.b[x.battle._id] = 1; DIRECT.sent++; } });
+            B.recs.forEach(function (r) { var k = r.i || arKey(r); if (ad[String(r.i || '')] || ad[k]) { sent.d[k] = 1; DIRECT.sent++; } });
+            B.roster.forEach(function (x) { if (ar[String(x.t)]) { sent.r[x.t] = 1; DIRECT.sent++; } });
+            B.dlist.forEach(function (r) { if (al[r.i]) { sent.l[r.i] = 1; DIRECT.sent++; } });
+            B.members.forEach(function (r) { if (am[r.sq + '|' + r.t]) sent.m[r.sq + '|' + r.t] = 1; });
+            B.dir.forEach(function (e) { if (ax[e.k + '|' + e.id]) { sent.x[e.k + '|' + e.id] = e.t; DIRECT.sent++; } });
+            B.map.forEach(function (m) { if (at[String(m.t)]) { sent.t[m.t] = 1; DIRECT.sent++; } });
+            store.set('sent', sent);
+          });
+        });
+      }, Promise.resolve()).then(function () { DIRECT.ok = Date.now(); DIRECT.err = null; DIRECT.wait = 0; });
+    }).catch(function (e) { DIRECT.err = String((e && e.message) || e); DIRECT.dirty = true; })
+      .then(function () { DIRECT.busy = false; if (panel.style.display !== 'none' && view === 'set') render(); });
+  }
+  // New data: sent within half a minute; a failure is retried every five minutes.
+  setInterval(function () {
+    if (!directOn()) return;
+    if (DIRECT.dirty || (DIRECT.err && Date.now() - DIRECT.last > 300000) || Date.now() - DIRECT.last > 900000) directPush();
+  }, 30000);
+  setTimeout(function () { if (directOn()) directPush(); }, 20000);
+  function directRow() {
+    var h = '<div class="row"><label class="c"><input type="checkbox" id="f_direct"' + (S.inputs.direct === true ? ' checked' : '') + '>Send to the shared store directly (no planner tab needed)</label></div>';
+    if (S.inputs.direct === true) {
+      if (typeof GM_xmlhttpRequest !== 'function') h += line('Your script manager does not allow this script to send (GM_xmlhttpRequest is missing): update PvP Meta.', 'bad');
+      else if (DIRECT.err) h += line('Shared store: sending failed (' + DIRECT.err + '); it will be tried again.', 'bad');
+      else h += line('Shared store: ' + (DIRECT.ok ? 'up to date ' + whenTxt(DIRECT.ok) : (DIRECT.busy ? 'sending...' : 'waiting')) + (DIRECT.sent ? ' · ' + DIRECT.sent + ' items sent this session' : '') + (DIRECT.wait ? ' · ' + DIRECT.wait + ' waiting' : '') + '.', 'mu');
+      h += line('Sends to the planner\'s own shared store (not the game): your build, duels, battles, Arena results, Squadron Groups and the map, shared with everyone who opens the planner.', 'mu');
+    }
+    return h;
   }
 
   /* ============================================================
@@ -2610,7 +2708,7 @@
     arcDone(job);
   }
   function arcDone(job) {
-    job.then(function () { ARC.last = Date.now(); ARC.err = null; return arcCount(); })
+    job.then(function () { ARC.last = Date.now(); ARC.err = null; DIRECT.dirty = true; return arcCount(); })
       .then(function () { if (panel.style.display !== 'none' && view === 'set') render(); }, function (e) { ARC.err = String((e && e.message) || e); });
   }
 
@@ -2683,7 +2781,7 @@
      storage (one outbox per game tab and realm, so two game tabs never overwrite each
      other). The same script, running on the planner page, hands them to the page, which
      saves them, shares them like any import (unless sharing is off there) and says which
-     it took. Nothing is sent to the game, and the script makes no network request. */
+     it took. Nothing is sent to the game; this hand-over makes no network request. */
   var LIVE_MAX = 3 * 1024 * 1024;
   var LIVE_TAB = (function () { try { var v = sessionStorage.getItem('sopvp:tab'); if (!v) { v = Math.random().toString(36).slice(2, 10); sessionStorage.setItem('sopvp:tab', v); } return v; } catch (e) { return Math.random().toString(36).slice(2, 10); } })();
   var LIVE_KEY = 'out:' + REALM + ':' + LIVE_TAB;
@@ -2748,6 +2846,7 @@
     h += line('Kept whole in this browser (about 0.1 MB a squadron battle). It leaves this game tab only to the planner page: when you click Open in planner, and (with the box below ticked) by itself whenever a planner tab is open. The planner then adds it to the shared store everyone uses (battles, rosters, arena results, map holders, player names with squadron, Elo, clones, crafting and Velari levels), unless sharing is switched off on the planner\'s Import tab. Battles and attack notices pushed by the game stay in this browser only for now.', 'mu');
     h += '<div class="row"><label class="c"><input type="checkbox" id="f_arc"' + (S.inputs.archive === false ? '' : ' checked') + '>Keep battles</label>' +
       '<label class="c"><input type="checkbox" id="f_live"' + (S.inputs.live === true ? ' checked' : '') + '>Hand new data to an open planner tab (live)</label></div>';
+    h += directRow();
     h += renderCensus();
     h += '<div class="row"><button class="act" id="b_arcdl">Download archive (.json)</button><button class="act" id="b_arcclr">Clear archive</button></div>';
     h += line('Open in planner sends your build, your duels, the kept battles, rosters, Arena list, map and directory to the web planner, where you can plan against one player or a whole squadron.', 'mu');
@@ -2843,7 +2942,7 @@
       numField('f_gap', 'Least gain worth a change (win %)', 'bestGap') + '</div>';
     h += '<div class="row"><label class="c"><input type="checkbox" id="f_rec"' + (S.inputs.recBattles === false ? '' : ' checked') + '>Record duels</label></div>';
     h += kvs([['Duels stored', String(S.battles.length) + ' / ' + AR_MAX], ['Background worker', S.wkFail ? 'refused: ' + S.wkFail : 'ok']]);
-    h += line('Reads your build and your arena duels from the game page. It makes no network request of any kind and never clicks or acts in the game.');
+    h += line('Reads your build and your arena duels from the game page. It sends nothing to the game and never clicks or acts in the game; it only talks to the planner\'s own shared store, and only if you tick that below.');
     h += line('Its duels are its own: Astrolabe keeps a separate record, and neither script can see the other\'s.', 'mu');
     h += renderArchive();
     h += '<div class="row"><button class="act" id="b_back">Back</button></div>';
@@ -2891,6 +2990,7 @@
     on('#b_back', function () { view = 'pvp'; render(); });
     on('#f_arc', function () { S.inputs.archive = panel.querySelector('#f_arc').checked; saveInputs(); render(); }, 'change');
     on('#f_live', function () { S.inputs.live = panel.querySelector('#f_live').checked; saveInputs(); render(); }, 'change');
+    on('#f_direct', function () { S.inputs.direct = panel.querySelector('#f_direct').checked; saveInputs(); if (S.inputs.direct) { DIRECT.dirty = true; directPush(); } render(); }, 'change');
     on('#b_plopen', plOpen);
     on('#b_arcdl', function () { arcDownload().catch(function (e) { ARC.err = 'download failed: ' + ((e && e.message) || e); render(); }); });
     on('#b_arcclr', function () {
