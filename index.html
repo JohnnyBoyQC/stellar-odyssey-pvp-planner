@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PvP Build Planner (beta)</title>
-<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.12.0">
+<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.13.0">
 </head>
 <body>
 <script>
 (function () {
   'use strict';
-  var PAGE_VER = "1.12.0";
+  var PAGE_VER = "1.13.0";
   var GRAB_SRC = "(function () {\nif (window.__sopvpGrab) { window.__sopvpGrab.show(); return; }\nvar PL = 'https://johnnyboyqc.github.io/stellar-odyssey-pvp-planner/', OR = 'https://johnnyboyqc.github.io';\nvar G = { squad: {}, roster: null, duels: {}, list: {}, box: null };\nvar RE = /\\/api\\/(squadrons\\/(battlelog|groups)|battlefield\\/arenaduels)(\\?|$)/;\nfunction abs(u) { try { return new URL(String((u && u.href) || u), location.href).href; } catch (e) { return String(u); } }\nfunction take(url, text) {\nvar b;\ntry { b = JSON.parse(text); } catch (e) { return; }\nif (/battlelog/.test(url)) (b && b.battles || []).forEach(function (x) { if (x && x._id && Array.isArray(x.logs)) G.squad[x._id] = x; });\nelse if (/arenaduels/.test(url)) (b && b.results || []).forEach(function (x) { if (x && x._id && x.attackerName && x.defenderName) G.list[x._id] = x; });\nelse G.roster = { t: Date.now(), body: text };\ndraw();\n}\nvar XP = XMLHttpRequest.prototype, oO = XP.open, oS = XP.send;\nXP.open = function (m, u) { try { this.__sopvpG = abs(u); } catch (e) {} return oO.apply(this, arguments); };\nXP.send = function () {\nvar x = this;\ntry {\nif (RE.test(x.__sopvpG || '')) x.addEventListener('load', function () {\ntry {\nif (x.status < 200 || x.status >= 300) return;\nvar t = (x.responseType === '' || x.responseType === 'text') ? x.responseText : (x.responseType === 'json' ? JSON.stringify(x.response) : null);\nif (t) take(x.responseURL || x.__sopvpG, t);\n} catch (e) {}\n});\n} catch (e) {}\nreturn oS.apply(this, arguments);\n};\nvar oF = window.fetch;\nif (typeof oF === 'function') window.fetch = function (i) {\nvar p = oF.apply(this, arguments);\ntry {\nvar u = abs(typeof i === 'string' ? i : (i && i.url));\nif (RE.test(u)) p.then(function (r) { if (r.ok) r.clone().text().then(function (t) { take(r.url || u, t); }, function () {}); }, function () {});\n} catch (e) {}\nreturn p;\n};\nfunction state() {\ntry {\nvar el = document.querySelector('#q-app') || document.querySelector('#app'), a = el && el.__vue_app__;\nvar p = a && a.config && a.config.globalProperties && a.config.globalProperties.$pinia;\nreturn p && p.state && p.state.value;\n} catch (e) { return null; }\n}\nfunction copy(o) { try { return JSON.parse(JSON.stringify(o)); } catch (e) { return null; } }\nfunction tick() {\nvar st = state();\nif (!st) return;\ntry {\nvar A = st.PvPArenaStore, d = A && A.currentDuel;\nif (d && d._id && d.logs && d.logs.length && !G.duels[d._id]) { G.duels[d._id] = copy(d); draw(); }\nvar s = st.squadronStore;\nif (!G.roster && s && s.group1 && s.group1.length) { G.roster = { t: Date.now(), body: JSON.stringify({ squad: [{ group1: copy(s.group1), group2: copy(s.group2 || []), group3: copy(s.group3 || []), available: [] }] }) }; draw(); }\n} catch (e) {}\n}\nsetInterval(tick, 1000);\n// The squadron's member list: the game page always holds it (names only).\nfunction sqNames(st) {\ntry {\nvar q = st.UserStore.squadron;\nif (!q || !Array.isArray(q.members) || !q.members.length) return [];\nreturn [{ t: Date.now(), sq: String(q.name || ''), names: q.members.map(function (m) { return m && m.username ? String(m.username) : null; }).filter(Boolean).slice(0, 300) }];\n} catch (e) { return []; }\n}\n// Squadron Groups as the page shows it right now (every member's PvP\n// points, gear and clones), once that tab has been opened. Members who are\n// in no group come from the game's last answer (lastBody), which lists them.\nfunction sqLive(st, lastBody) {\ntry {\nvar s = st.squadronStore;\nif (!s || !Array.isArray(s.group1)) return null;\nvar gs = [s.group1, s.group2 || [], s.group3 || []], n = 0, inG = {};\ngs.forEach(function (g) { g.forEach(function (m) { if (m && m.username && m.pvpstats) { n++; inG[m.username] = 1; } }); });\nif (!n) return null;\nvar av = Array.isArray(s.available) ? s.available : null;\nif (!av && lastBody) { try { var b = JSON.parse(lastBody), q = Array.isArray(b.squad) ? b.squad[0] : b; av = (q.available || []).filter(function (m) { return m && m.username && !inG[m.username]; }); } catch (e) { av = null; } }\nreturn { t: Date.now(), body: JSON.stringify({ squad: [{ group1: gs[0], group2: gs[1], group3: gs[2], available: av || [] }] }) };\n} catch (e) { return null; }\n}\nfunction build(st) {\ntry {\nvar U = st.UserStore, P = U.player, mats = {};\n(P.pvp_gear || []).forEach(function (g) { mats[String(g.statCost || '').toLowerCase()] = 1; });\nvar slots = (st.PetsStore && st.PetsStore.petSlots) || [], inSlot = {};\nslots.forEach(function (x) { if (x && x.pet) inSlot[x.pet] = 1; });\nreturn {\nUserStore: { username: U.username, pvp_badges: U.pvp_badges, player: copy({ pvp_gear: P.pvp_gear, pvpstats: P.pvpstats, clones: P.clones }) },\nCraftStore: { crafting_level: st.CraftStore && st.CraftStore.crafting_level },\nMaterialsStore: { materialsList: ((st.MaterialsStore && st.MaterialsStore.materialsList) || []).filter(function (m) { var n = m && m.item && (m.item.name || m.item); return n && mats[String(n).toLowerCase()]; }).map(function (m) { return { item: { name: m.item.name || m.item }, quantity: m.quantity }; }) },\nPetsStore: { petSlots: slots.filter(function (x) { return x && x.pet; }).map(function (x) { return { pet: x.pet }; }), pets: ((st.PetsStore && st.PetsStore.pets) || []).filter(function (p) { return p && inSlot[p._id] && p.name === 'Velari'; }).map(function (p) { return { _id: p._id, name: p.name, level: p.level }; }) }\n};\n} catch (e) { return null; }\n}\nfunction payload() {\nvar st = state();\nreturn { app: 'PvP Planner button', v: 1, made: Date.now(), me: st && st.UserStore ? st.UserStore.username : null, build: st ? build(st) : null,\nsquad: Object.keys(G.squad).map(function (k) { return { battle: G.squad[k] }; }),\nduel: Object.keys(G.duels).map(function (k) { return { duel: G.duels[k], saved: Date.now() }; }),\nduelList: Object.keys(G.list).map(function (k) { return { row: G.list[k] }; }),\nroster: (G.roster ? [G.roster] : []).concat(st && sqLive(st, G.roster && G.roster.body) ? [sqLive(st, G.roster && G.roster.body)] : []),\nmembers: st ? sqNames(st) : [] };\n}\nfunction send() {\nvar nonce = String(Math.random()).slice(2), w = window.open(PL + '#wait=' + nonce, '_blank');\nif (!w) { alert(L.p); return; }\nwindow.addEventListener('message', function on(e) {\nif (e.origin !== OR || !e.data || e.data.sopvpReady !== nonce || e.source !== w) return;\nwindow.removeEventListener('message', on);\ne.source.postMessage({ sopvpRaw: payload(), nonce: nonce }, OR);\n});\n}\nvar L = (function () {\nvar n = String((navigator.languages && navigator.languages[0]) || navigator.language || 'en').toLowerCase();\nvar T = {\nes: { m: 'miembros del escuadrón', b: 'batallas de escuadrón', d: 'duelos de arena abiertos', l: 'en la lista de arena', r: 'plantilla', y: 'sí', n: 'todavía no', h: 'Ahora recorre Registro de peleas › Escuadrón (50 por página, todas las páginas), abre Registro de peleas › Arena y abre Grupos de escuadrón. Ver pelea solo hace falta para rivales nunca vistos en una batalla de escuadrón. Deja esta pestaña abierta.', s: 'Enviar al planificador ↗', p: 'El navegador bloqueó la pestaña nueva: permite las ventanas emergentes de este sitio y vuelve a pulsar Enviar.' },\nzh: { m: '名舰队成员', b: '场舰队战斗', d: '场已打开的竞技场决斗', l: '条竞技场列表记录', r: '名单', y: '已有', n: '还没有', h: '现在浏览 战斗日志 › 舰队（每页 50 条，每一页都看），打开 战斗日志 › 竞技场，再打开舰队编组。只有从未在舰队战斗中见过的对手才需要点击查看战斗。请保持此标签页打开。', s: '发送到规划器 ↗', p: '浏览器拦截了新标签页：请允许本网站弹出窗口后再点一次发送。' },\nen: { m: 'squadron members', b: 'squadron battles', d: 'arena duels opened', l: 'in the Arena list', r: 'roster', y: 'yes', n: 'not yet', h: 'Now browse Battle Log › Squadron (50 per page, every page), open Battle Log › Arena, and open Squadron Groups. View battle is only needed for opponents never seen in a squadron battle. Keep this tab open.', s: 'Send to planner ↗', p: 'The browser blocked the new tab: allow pop-ups for this site, then click Send again.' }\n};\nreturn T[n.indexOf('es') === 0 ? 'es' : (n.indexOf('zh') === 0 ? 'zh' : 'en')];\n})();\nfunction draw() {\nif (!G.box) return;\nvar n = Object.keys(G.squad).length, d = Object.keys(G.duels).length, l = Object.keys(G.list).length;\nG.box.querySelector('.c').textContent = n + ' ' + L.b + ', ' + l + ' ' + L.l + ', ' + d + ' ' + L.d + ', ' + L.r + ': ' + (G.roster || (state() && sqLive(state(), null)) ? L.y : L.n) + (function () { var st = state(), m = st ? sqNames(st) : []; return m.length ? ', ' + m[0].names.length + ' ' + L.m : ''; })();\n}\nfunction show() {\nif (G.box) { G.box.style.display = 'block'; return; }\nvar b = document.createElement('div');\nb.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;background:#1a2129;color:#d5dde6;border:1px solid #4fb3e8;border-radius:10px;padding:10px 12px;font:13px sans-serif;max-width:300px;box-shadow:0 4px 16px rgba(0,0,0,.4)';\nb.innerHTML = '<b>PvP Planner<\/b> <span style=\"float:right;cursor:pointer\" class=\"x\">✕<\/span><div class=\"c\" style=\"margin:6px 0\"><\/div>' +\n'<div class=\"h\" style=\"font-size:11px;color:#9aa8b6;margin-bottom:8px\"><\/div>' +\n'<button class=\"s\" style=\"background:#4fb3e8;color:#0d1b24;border:0;border-radius:7px;padding:6px 12px;font-weight:600;cursor:pointer\"><\/button>';\nb.querySelector('.s').textContent = L.s;\nb.querySelector('.h').textContent = L.h;\nb.querySelector('.x').onclick = function () { b.style.display = 'none'; };\nb.querySelector('.s').onclick = send;\ndocument.body.appendChild(b);\nG.box = b; draw();\n}\nwindow.__sopvpGrab = { show: show, data: G };\ntick(); show();\n})();";
 
   /* ============================================================
@@ -598,6 +598,8 @@
       'Every fight here always goes the same way: no change of build alters it.': 'Aquí cada pelea acaba siempre igual: ningún cambio de build lo altera.',
       '{0}% → {1}% with free changes (points, gear stats, skills). Green: what to change.': '{0}% → {1}% con cambios gratis (puntos, stats del equipo, habilidades). Verde: lo que hay que cambiar.',
       'Reach a win %': 'Alcanzar un % de victoria',
+      "{0}'s build is from Squadron Groups {1}: a newer clone or gear is not in this chance.": "La build de {0} viene de Grupos de escuadrón ({1}): un clon o equipo más reciente no está en esta probabilidad.",
+      "{0}'s newest fight seen is {1}: anything they changed since (gear, a new clone) is not in this chance.": "El combate más reciente visto de {0} es de {1}: lo que haya cambiado desde entonces (equipo, un clon nuevo) no está en esta probabilidad.",
       "<b>PvP Collector (best, for the whole squadron):</b> install <a href=\"https://www.tampermonkey.net/\" target=\"_blank\" rel=\"noopener\">Tampermonkey</a>, then <a href=\"{0}\" target=\"_blank\" rel=\"noopener\">PvP Collector</a>. That is all: play as usual, and what the game shows you reaches this planner by itself, for everyone. A small badge in the game shows it is working and tells you when an update is out.": "<b>PvP Collector (lo mejor, para todo el escuadrón):</b> instala <a href=\"https://www.tampermonkey.net/\" target=\"_blank\" rel=\"noopener\">Tampermonkey</a> y luego <a href=\"{0}\" target=\"_blank\" rel=\"noopener\">PvP Collector</a>. Eso es todo: juega como siempre y lo que el juego te muestra llega solo a este planificador, para todos. Una pequeña insignia en el juego muestra que funciona y te avisa cuando hay una actualización.",
       "Click it once each time the game is open: it keeps what the game loads from then on and sends it to the planner, until the tab is closed. It is always the newest version. Web browsers only, not the Steam app.": "Haz clic una vez cada vez que abras el juego: guarda lo que el juego carga desde entonces y lo envía al planificador, hasta que cierres la pestaña. Siempre es la versión más reciente. Solo navegadores web, no la app de Steam.",
       "Older ways (no cloud): PvP Meta and the PvP Planner button": "Formas antiguas (sin nube): PvP Meta y el botón PvP Planner",
@@ -1175,6 +1177,8 @@
       'Every fight here always goes the same way: no change of build alters it.': '这里每场战斗结果都相同：改配置也无法改变。',
       '{0}% → {1}% with free changes (points, gear stats, skills). Green: what to change.': '{0}% → {1}%，只需免费调整（点数、装备属性、技能）。绿色：需要更改的项。',
       'Reach a win %': '达到目标胜率',
+      "{0}'s build is from Squadron Groups {1}: a newer clone or gear is not in this chance.": "{0} 的配置来自舰队分组（{1}）：之后新增的克隆体或装备不在此胜率中。",
+      "{0}'s newest fight seen is {1}: anything they changed since (gear, a new clone) is not in this chance.": "{0} 最近一次被看到的战斗是 {1}：此后的任何变化（装备、新克隆体）都不在此胜率中。",
       "<b>PvP Collector (best, for the whole squadron):</b> install <a href=\"https://www.tampermonkey.net/\" target=\"_blank\" rel=\"noopener\">Tampermonkey</a>, then <a href=\"{0}\" target=\"_blank\" rel=\"noopener\">PvP Collector</a>. That is all: play as usual, and what the game shows you reaches this planner by itself, for everyone. A small badge in the game shows it is working and tells you when an update is out.": "<b>PvP Collector（最佳，全舰队共享）：</b>安装 <a href=\"https://www.tampermonkey.net/\" target=\"_blank\" rel=\"noopener\">Tampermonkey</a>，再安装 <a href=\"{0}\" target=\"_blank\" rel=\"noopener\">PvP Collector</a>。就这样：照常游戏，游戏显示给你的内容会自动发送到这个规划器，所有人共享。游戏里的小标记会显示它在工作，并在有更新时提醒你。",
       "Click it once each time the game is open: it keeps what the game loads from then on and sends it to the planner, until the tab is closed. It is always the newest version. Web browsers only, not the Steam app.": "每次打开游戏时点击一次：从那时起它会保存游戏加载的内容并发送到规划器，直到关闭该标签页。它总是最新版本。仅限网页浏览器，不支持 Steam 应用。",
       "Older ways (no cloud): PvP Meta and the PvP Planner button": "旧方式（不经云端）：PvP Meta 和 PvP Planner 按钮",
@@ -1477,7 +1481,7 @@
       '<div><span>' + esc(t('Best build')) + '</span><b class="' + (fr && fr.gain > Math.max(2 * fr.se, S.inputs.bestGap || 0) ? 'good' : '') + '">' + (fr ? pvPct(fr.score) + '%' : '--') + '</b>' + (fr ? '<em>' + esc(pts1(fr.gain)) + '</em>' : '') + '</div></div>';
     h += line(t('{0} simulated fights, half attacking, half defending · {1} rounds on average', [grp(arSims()), Math.round(plan.cur.rounds || 0)]), 'mu');
     if (plan.synthetic) h += line(t('Against made-up rivals with your total stats (no opponent picked).'), 'mu');
-    h += line(t('Not yet checked against real Arena duel logs.'), 'mu');
+    arAgeWarn().forEach(function (w) { h += line('⚠ ' + w, 'warn'); });
     h += again;
     return h + '</div>';
   }
@@ -1496,10 +1500,10 @@
     var d = typeof plDir === 'function' ? plDir(c.name) : null, el = typeof plElo === 'function' ? plElo()[c.name] : null;
     if (el) h += line(t('Arena Elo {0}', [grp(el.e)]) + (el.rk ? ' · ' + t('rank {0}', [el.rk]) : ''), 'mu');
     if (d && (dirVal(d, 'cr') || dirVal(d, 'vel') || dirVal(d, 'seen'))) h += line(t('Crafting {0} · Velari {1} · last seen {2}', [dirVal(d, 'cr') || '?', dirVal(d, 'vel') || '?', dirVal(d, 'seen') ? ago(dirVal(d, 'seen')) : '?']) + (dirVal(d, 'act') === 0 ? ' · ' + t('inactive') : ''), 'mu');
-    var shots = Math.min(c.P ? c.P[2] || 0 : 0, c.E ? c.E[2] || 0 : 0), last = plLast(c);
+    var shots = c.ns != null ? c.ns : Math.min(c.P ? c.P[2] || 0 : 0, c.E ? c.E[2] || 0 : 0), last = plLast(c);
     if (c.mate) h += line(t('Squad member: exact build from Squadron Groups ({0}).', [last ? ago(last) : '?']), 'mu');
     else h += line(t('{0} shots seen · updated {1}', [grp(shots), last ? ago(last) : '?']), vsOld(last) ? 'warn' : 'mu');
-    if (!c.mate && shots < 30) h += line(t('Weak estimate: precision and evasion lean on the usual gear split.'), 'warn');
+    if (!c.mate && Math.min(c.P ? c.P[2] || 0 : 0, c.E ? c.E[2] || 0 : 0) < 30) h += line(t('Weak estimate: precision and evasion lean on the usual gear split.'), 'warn');
     if (!c.mate) h += '<details class="more" id="vsdet"' + (VS_OPEN ? ' open' : '') + '><summary>' + esc(t('Their estimated build')) + '</summary>' + vsBuildCard(c) + '</details>';
     return h + '</div>';
   }
@@ -1556,6 +1560,21 @@
         PetsStore: vp ? { petSlots: [{ pet: 'v' }], pets: [{ _id: 'v', name: 'Velari', level: vp }] } : { petSlots: [], pets: [] }, t: rs[i].t };
     }
     return null;
+  }
+  // Warnings under the chance (1.13.0): the number only knows the builds as last seen.
+  var AR_STALE_MS = 12 * 3600000;
+  function arAgeWarn() {
+    var out = [], now = Date.now(), me = VS.me || 'me';
+    if (me !== 'me' && me !== arenaMyName()) {
+      var r = arenaRootOf(me);
+      if (r && now - r.t > AR_STALE_MS) out.push(t("{0}'s build is from Squadron Groups {1}: a newer clone or gear is not in this chance.", [me, ago(r.t)]));
+    }
+    if (vsKind() === 'player') {
+      var c = vsCard(VS.pl), last = c ? plLast(c) : 0;
+      if (c && last && now - last > AR_STALE_MS) out.push(c.mate ? t("{0}'s build is from Squadron Groups {1}: a newer clone or gear is not in this chance.", [c.name, ago(last)])
+        : t("{0}'s newest fight seen is {1}: anything they changed since (gear, a new clone) is not in this chance.", [c.name, ago(last)]));
+    }
+    return out;
   }
   function arenaMyName() { return (S.storeState && S.storeState.UserStore && S.storeState.UserStore.username) || (typeof IMP !== 'undefined' && IMP && IMP.x && IMP.x.me) || null; }
   function arenaPv() {
@@ -1867,6 +1886,7 @@
   // when its log-likelihood gain (x2) passes that test's threshold, set from
   // the no-change spread in cp_test.js (about 2 false alarms in 100 players
   // with no change, for each test). Each observation carries its fight time.
+  var PX_FADE = { hl: 0 };   // half-life of old fights in ms; 0 = every fight counts the same
   var PX_CP_THP = 14, PX_CP_THK = 17, PX_CP_MIN = 60, PX_CP_SPLITS = 40;
   function pxLLp(obs) {
     if (!obs.length) return 0;
@@ -2048,6 +2068,15 @@
 
     // One card per player: the latest build seen, and the estimates from
     // that build's battles when they are enough, else from all of them.
+    // Old fights can fade: a fight PX_FADE.hl older than the newest one in the
+    // archive counts half, two half-lives a quarter. OFF (hl 0) since 1.13.0:
+    // replayed on 40 real Arena results it did not predict better (arena_check.js
+    // FADE_DAYS=7 re-tests it as more results come in).
+    var tRef = 0;
+    summaries.forEach(function (x) { if (x.t > tRef) tRef = x.t; });
+    (duels || []).forEach(function (r) { if (r && r.t > tRef) tRef = r.t; });
+    var fade = function (t) { return PX_FADE.hl > 0 && tRef > t ? Math.pow(0.5, (tRef - t) / PX_FADE.hl) : 1; };
+    var fadeObs = function (list) { return list.map(function (o) { var w = fade(o[3]); return [o[0], o[1] * w, o[2] * w, o[3]]; }); };
     var out = [], cards = [];
     function cat(which, list) { var all = []; list.forEach(function (x) { all = all.concat(x[which] || []); }); return all; }
     Object.keys(players).forEach(function (u) {
@@ -2074,15 +2103,17 @@
         oK = oK.filter(function (x) { return x[0] >= chg.t; });
       }
       var GL = pxGear(last.d, last.h, last.n) || 1, shp = pxShape(last.d, last.h, last.n);
+      var raw = Math.min(pxTries(oP), pxTries(oE));
+      oP = fadeObs(oP); oE = fadeObs(oE);
       var pp = pxFit(oP, [shp.p, shp.W / 2, shp.W]), ee = pxFit(oE, [shp.e, shp.W / 2, shp.W]);
-      var skk = {}; oK.forEach(function (x) { pxSumSk(skk, x[1]); });
+      var skk = {}; oK.forEach(function (x) { var w = fade(x[0]), o = {}; Object.keys(x[1]).forEach(function (k) { o[k] = x[1][k] * w; }); pxSumSk(skk, o); });
       var sk = skk.L || skk.blkT ? pxSkills({ L: skk.L || 0, dot: skk.dot || 0, focus: skk.focus || 0, stunT: skk.stunT || 0, stun: skk.stun || 0, blkT: skk.blkT || 0, blk: skk.blk || 0 }) : null;
       var cl = last.cl;
       if (!cl && last.c) cl = last.c.map(function (x) { return [x[0], x[1], x[2]]; });
       // [value now (share x current power + hull), doubt (log scale), real swings, share]
       function r3(f) { return f ? [Math.round(f.v * GL), Math.round(f.se * 1000) / 1000, f.n, Math.round(f.v * 10000) / 10000] : null; }
       out.push({ bt: chg ? Math.max(chg.t, last.t0) : last.t0, bl: last.t1, chg: chg ? chg.t : 0, chgw: chg ? chg.what : '', ours: c.ours ? c.chg.t : 0, name: u, sq: p.sq, g: p.g || 0, own: ownNames[u] || p.sq === own ? 1 : 0, t: p.t, nb: p.nb, nd: p.nd, snaps: p.snaps.length, mixed: c.mixed,
-        d: last.d, h: last.h, n: last.n, cl: cl || [[0, 0, 0]], P: r3(pp), E: r3(ee), sk: sk ? sk.s : null, skc: sk ? sk.conf : 0, skn: sk ? sk.n : 0 });
+        d: last.d, h: last.h, n: last.n, cl: cl || [[0, 0, 0]], P: r3(pp), E: r3(ee), ns: raw, tRef: tRef, sk: sk ? sk.s : null, skc: sk ? sk.conf : 0, skn: sk ? sk.n : 0 });
     });
     out.sort(function (x, y) { return y.t - x.t; });
     var rs = rosters.length ? rosters[rosters.length - 1] : null;
@@ -4474,7 +4505,7 @@
   }
 
   /* ============================================================
-     FROM ASTROLABE 3.22.9 (copied unchanged by the build step)
+     FROM ASTROLABE 3.22.10 (copied unchanged by the build step)
      ============================================================ */
 
   function numOr(v) {
