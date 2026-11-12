@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PvP Build Planner (beta)</title>
-<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, for squadron members. Login page v1.21.0">
+<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, for squadron members. Login page v1.21.1">
 <style>
   :root { --bg: #f4f5f8; --card: #fff; --fg: #1d2230; --mu: #5b6478; --line: #d6dae3; --acc: #3d5afe; --bad: #b3261e; --good: #1b7a3a; }
   @media (prefers-color-scheme: dark) { :root { --bg: #11141b; --card: #1a1f2a; --fg: #e6e9f0; --mu: #9aa3b5; --line: #2c3342; --acc: #7c8cff; --bad: #ff8a80; --good: #7bd88f; } }
@@ -30,7 +30,6 @@
 <main>
   <div class="card" id="box">
     <h1 id="h">PvP Build Planner</h1>
-    <p class="mu" id="sub">For squadron members only (Steam).</p>
     <form id="form" hidden>
       <label for="key" id="lk">Your Stellar Odyssey API key</label>
       <input type="password" id="key" autocomplete="off" spellcheck="false" placeholder="Profile › Game API in the game">
@@ -53,7 +52,7 @@
   };
   function t(s, a) { var x = (TR[L] && TR[L][s]) || s; return x.replace(/\{(\d)\}/g, function (_, i) { return a && a[i] !== undefined ? a[i] : ''; }); }
   function $(id) { return document.getElementById(id); }
-  ['sub', 'lk', 'lr', 'go', 'why', 'fg'].forEach(function (id) { $(id).textContent = t($(id).textContent); });
+  ['lk', 'lr', 'go', 'why', 'fg'].forEach(function (id) { $(id).textContent = t($(id).textContent); });
   $('key').placeholder = t($('key').placeholder);
   function msg(s, cls) { var m = $('msg'); m.textContent = s || ''; m.className = cls || ''; }
   function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k); if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} return null; }
@@ -99,7 +98,7 @@
       else if (b.error === 'limit' && b.daily) msg(t('Today\'s 50 calls to /user for this key are used up; they come back at 00:00 UTC. Do not retry before then.'), 'bad');
       else if (b.error === 'limit') msg(t('The game asked to slow down. Wait a few minutes before trying again.'), 'bad');
       else if (b.error === 'busy') msg(t('Many sign-ins right now. Try again in an hour.'), 'bad');
-      else msg(t('The server could not check the key ({0}). Try again later.', [b.error || ('HTTP ' + x.s)]), 'bad');
+      else msg(t('The server could not check the key ({0}). Try again later.', [(b.error || 'HTTP') + ' ' + (b.status || x.s) + (b.missing ? ', ' + b.missing.join(', ') : '')]), 'bad');
     }, function (e) { $('go').disabled = false; msg(t('The server could not check the key ({0}). Try again later.', [(e && e.message) || 'network']), 'bad'); });
   });
   function cleanUrl() { try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {} }
