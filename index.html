@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PvP Build Planner (beta)</title>
-<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.13.0">
+<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.14.0">
 </head>
 <body>
 <script>
 (function () {
   'use strict';
-  var PAGE_VER = "1.13.0";
+  var PAGE_VER = "1.14.0";
   var GRAB_SRC = "(function () {\nif (window.__sopvpGrab) { window.__sopvpGrab.show(); return; }\nvar PL = 'https://johnnyboyqc.github.io/stellar-odyssey-pvp-planner/', OR = 'https://johnnyboyqc.github.io';\nvar G = { squad: {}, roster: null, duels: {}, list: {}, box: null };\nvar RE = /\\/api\\/(squadrons\\/(battlelog|groups)|battlefield\\/arenaduels)(\\?|$)/;\nfunction abs(u) { try { return new URL(String((u && u.href) || u), location.href).href; } catch (e) { return String(u); } }\nfunction take(url, text) {\nvar b;\ntry { b = JSON.parse(text); } catch (e) { return; }\nif (/battlelog/.test(url)) (b && b.battles || []).forEach(function (x) { if (x && x._id && Array.isArray(x.logs)) G.squad[x._id] = x; });\nelse if (/arenaduels/.test(url)) (b && b.results || []).forEach(function (x) { if (x && x._id && x.attackerName && x.defenderName) G.list[x._id] = x; });\nelse G.roster = { t: Date.now(), body: text };\ndraw();\n}\nvar XP = XMLHttpRequest.prototype, oO = XP.open, oS = XP.send;\nXP.open = function (m, u) { try { this.__sopvpG = abs(u); } catch (e) {} return oO.apply(this, arguments); };\nXP.send = function () {\nvar x = this;\ntry {\nif (RE.test(x.__sopvpG || '')) x.addEventListener('load', function () {\ntry {\nif (x.status < 200 || x.status >= 300) return;\nvar t = (x.responseType === '' || x.responseType === 'text') ? x.responseText : (x.responseType === 'json' ? JSON.stringify(x.response) : null);\nif (t) take(x.responseURL || x.__sopvpG, t);\n} catch (e) {}\n});\n} catch (e) {}\nreturn oS.apply(this, arguments);\n};\nvar oF = window.fetch;\nif (typeof oF === 'function') window.fetch = function (i) {\nvar p = oF.apply(this, arguments);\ntry {\nvar u = abs(typeof i === 'string' ? i : (i && i.url));\nif (RE.test(u)) p.then(function (r) { if (r.ok) r.clone().text().then(function (t) { take(r.url || u, t); }, function () {}); }, function () {});\n} catch (e) {}\nreturn p;\n};\nfunction state() {\ntry {\nvar el = document.querySelector('#q-app') || document.querySelector('#app'), a = el && el.__vue_app__;\nvar p = a && a.config && a.config.globalProperties && a.config.globalProperties.$pinia;\nreturn p && p.state && p.state.value;\n} catch (e) { return null; }\n}\nfunction copy(o) { try { return JSON.parse(JSON.stringify(o)); } catch (e) { return null; } }\nfunction tick() {\nvar st = state();\nif (!st) return;\ntry {\nvar A = st.PvPArenaStore, d = A && A.currentDuel;\nif (d && d._id && d.logs && d.logs.length && !G.duels[d._id]) { G.duels[d._id] = copy(d); draw(); }\nvar s = st.squadronStore;\nif (!G.roster && s && s.group1 && s.group1.length) { G.roster = { t: Date.now(), body: JSON.stringify({ squad: [{ group1: copy(s.group1), group2: copy(s.group2 || []), group3: copy(s.group3 || []), available: [] }] }) }; draw(); }\n} catch (e) {}\n}\nsetInterval(tick, 1000);\n// The squadron's member list: the game page always holds it (names only).\nfunction sqNames(st) {\ntry {\nvar q = st.UserStore.squadron;\nif (!q || !Array.isArray(q.members) || !q.members.length) return [];\nreturn [{ t: Date.now(), sq: String(q.name || ''), names: q.members.map(function (m) { return m && m.username ? String(m.username) : null; }).filter(Boolean).slice(0, 300) }];\n} catch (e) { return []; }\n}\n// Squadron Groups as the page shows it right now (every member's PvP\n// points, gear and clones), once that tab has been opened. Members who are\n// in no group come from the game's last answer (lastBody), which lists them.\nfunction sqLive(st, lastBody) {\ntry {\nvar s = st.squadronStore;\nif (!s || !Array.isArray(s.group1)) return null;\nvar gs = [s.group1, s.group2 || [], s.group3 || []], n = 0, inG = {};\ngs.forEach(function (g) { g.forEach(function (m) { if (m && m.username && m.pvpstats) { n++; inG[m.username] = 1; } }); });\nif (!n) return null;\nvar av = Array.isArray(s.available) ? s.available : null;\nif (!av && lastBody) { try { var b = JSON.parse(lastBody), q = Array.isArray(b.squad) ? b.squad[0] : b; av = (q.available || []).filter(function (m) { return m && m.username && !inG[m.username]; }); } catch (e) { av = null; } }\nreturn { t: Date.now(), body: JSON.stringify({ squad: [{ group1: gs[0], group2: gs[1], group3: gs[2], available: av || [] }] }) };\n} catch (e) { return null; }\n}\nfunction build(st) {\ntry {\nvar U = st.UserStore, P = U.player, mats = {};\n(P.pvp_gear || []).forEach(function (g) { mats[String(g.statCost || '').toLowerCase()] = 1; });\nvar slots = (st.PetsStore && st.PetsStore.petSlots) || [], inSlot = {};\nslots.forEach(function (x) { if (x && x.pet) inSlot[x.pet] = 1; });\nreturn {\nUserStore: { username: U.username, pvp_badges: U.pvp_badges, player: copy({ pvp_gear: P.pvp_gear, pvpstats: P.pvpstats, clones: P.clones }) },\nCraftStore: { crafting_level: st.CraftStore && st.CraftStore.crafting_level },\nMaterialsStore: { materialsList: ((st.MaterialsStore && st.MaterialsStore.materialsList) || []).filter(function (m) { var n = m && m.item && (m.item.name || m.item); return n && mats[String(n).toLowerCase()]; }).map(function (m) { return { item: { name: m.item.name || m.item }, quantity: m.quantity }; }) },\nPetsStore: { petSlots: slots.filter(function (x) { return x && x.pet; }).map(function (x) { return { pet: x.pet }; }), pets: ((st.PetsStore && st.PetsStore.pets) || []).filter(function (p) { return p && inSlot[p._id] && p.name === 'Velari'; }).map(function (p) { return { _id: p._id, name: p.name, level: p.level }; }) }\n};\n} catch (e) { return null; }\n}\nfunction payload() {\nvar st = state();\nreturn { app: 'PvP Planner button', v: 1, made: Date.now(), me: st && st.UserStore ? st.UserStore.username : null, build: st ? build(st) : null,\nsquad: Object.keys(G.squad).map(function (k) { return { battle: G.squad[k] }; }),\nduel: Object.keys(G.duels).map(function (k) { return { duel: G.duels[k], saved: Date.now() }; }),\nduelList: Object.keys(G.list).map(function (k) { return { row: G.list[k] }; }),\nroster: (G.roster ? [G.roster] : []).concat(st && sqLive(st, G.roster && G.roster.body) ? [sqLive(st, G.roster && G.roster.body)] : []),\nmembers: st ? sqNames(st) : [] };\n}\nfunction send() {\nvar nonce = String(Math.random()).slice(2), w = window.open(PL + '#wait=' + nonce, '_blank');\nif (!w) { alert(L.p); return; }\nwindow.addEventListener('message', function on(e) {\nif (e.origin !== OR || !e.data || e.data.sopvpReady !== nonce || e.source !== w) return;\nwindow.removeEventListener('message', on);\ne.source.postMessage({ sopvpRaw: payload(), nonce: nonce }, OR);\n});\n}\nvar L = (function () {\nvar n = String((navigator.languages && navigator.languages[0]) || navigator.language || 'en').toLowerCase();\nvar T = {\nes: { m: 'miembros del escuadrón', b: 'batallas de escuadrón', d: 'duelos de arena abiertos', l: 'en la lista de arena', r: 'plantilla', y: 'sí', n: 'todavía no', h: 'Ahora recorre Registro de peleas › Escuadrón (50 por página, todas las páginas), abre Registro de peleas › Arena y abre Grupos de escuadrón. Ver pelea solo hace falta para rivales nunca vistos en una batalla de escuadrón. Deja esta pestaña abierta.', s: 'Enviar al planificador ↗', p: 'El navegador bloqueó la pestaña nueva: permite las ventanas emergentes de este sitio y vuelve a pulsar Enviar.' },\nzh: { m: '名舰队成员', b: '场舰队战斗', d: '场已打开的竞技场决斗', l: '条竞技场列表记录', r: '名单', y: '已有', n: '还没有', h: '现在浏览 战斗日志 › 舰队（每页 50 条，每一页都看），打开 战斗日志 › 竞技场，再打开舰队编组。只有从未在舰队战斗中见过的对手才需要点击查看战斗。请保持此标签页打开。', s: '发送到规划器 ↗', p: '浏览器拦截了新标签页：请允许本网站弹出窗口后再点一次发送。' },\nen: { m: 'squadron members', b: 'squadron battles', d: 'arena duels opened', l: 'in the Arena list', r: 'roster', y: 'yes', n: 'not yet', h: 'Now browse Battle Log › Squadron (50 per page, every page), open Battle Log › Arena, and open Squadron Groups. View battle is only needed for opponents never seen in a squadron battle. Keep this tab open.', s: 'Send to planner ↗', p: 'The browser blocked the new tab: allow pop-ups for this site, then click Send again.' }\n};\nreturn T[n.indexOf('es') === 0 ? 'es' : (n.indexOf('zh') === 0 ? 'zh' : 'en')];\n})();\nfunction draw() {\nif (!G.box) return;\nvar n = Object.keys(G.squad).length, d = Object.keys(G.duels).length, l = Object.keys(G.list).length;\nG.box.querySelector('.c').textContent = n + ' ' + L.b + ', ' + l + ' ' + L.l + ', ' + d + ' ' + L.d + ', ' + L.r + ': ' + (G.roster || (state() && sqLive(state(), null)) ? L.y : L.n) + (function () { var st = state(), m = st ? sqNames(st) : []; return m.length ? ', ' + m[0].names.length + ' ' + L.m : ''; })();\n}\nfunction show() {\nif (G.box) { G.box.style.display = 'block'; return; }\nvar b = document.createElement('div');\nb.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;background:#1a2129;color:#d5dde6;border:1px solid #4fb3e8;border-radius:10px;padding:10px 12px;font:13px sans-serif;max-width:300px;box-shadow:0 4px 16px rgba(0,0,0,.4)';\nb.innerHTML = '<b>PvP Planner<\/b> <span style=\"float:right;cursor:pointer\" class=\"x\">✕<\/span><div class=\"c\" style=\"margin:6px 0\"><\/div>' +\n'<div class=\"h\" style=\"font-size:11px;color:#9aa8b6;margin-bottom:8px\"><\/div>' +\n'<button class=\"s\" style=\"background:#4fb3e8;color:#0d1b24;border:0;border-radius:7px;padding:6px 12px;font-weight:600;cursor:pointer\"><\/button>';\nb.querySelector('.s').textContent = L.s;\nb.querySelector('.h').textContent = L.h;\nb.querySelector('.x').onclick = function () { b.style.display = 'none'; };\nb.querySelector('.s').onclick = send;\ndocument.body.appendChild(b);\nG.box = b; draw();\n}\nwindow.__sopvpGrab = { show: show, data: G };\ntick(); show();\n})();";
 
   /* ============================================================
@@ -598,6 +598,13 @@
       'Every fight here always goes the same way: no change of build alters it.': 'Aquí cada pelea acaba siempre igual: ningún cambio de build lo altera.',
       '{0}% → {1}% with free changes (points, gear stats, skills). Green: what to change.': '{0}% → {1}% con cambios gratis (puntos, stats del equipo, habilidades). Verde: lo que hay que cambiar.',
       'Reach a win %': 'Alcanzar un % de victoria',
+      "(guess)": "(estimación)",
+      "guess, from {0}": "estimación, de {0}",
+      "Guess: since then, {0}.": "Estimación: desde entonces, {0}.",
+      "{0} fought in G{1}": "{0} luchó en G{1}",
+      "{0} fought for {1}": "{0} luchó por {1}",
+      "Put in their place: {0} (seen in {1} lately, in no other group).": "En su lugar: {0} (visto en {1} hace poco, en ningún otro grupo).",
+      "{0} place(s) left empty: nobody else known.": "{0} puesto(s) vacío(s): no se conoce a nadie más.",
       "{0}'s build is from Squadron Groups {1}: a newer clone or gear is not in this chance.": "La build de {0} viene de Grupos de escuadrón ({1}): un clon o equipo más reciente no está en esta probabilidad.",
       "{0}'s newest fight seen is {1}: anything they changed since (gear, a new clone) is not in this chance.": "El combate más reciente visto de {0} es de {1}: lo que haya cambiado desde entonces (equipo, un clon nuevo) no está en esta probabilidad.",
       "<b>PvP Collector (best, for the whole squadron):</b> install <a href=\"https://www.tampermonkey.net/\" target=\"_blank\" rel=\"noopener\">Tampermonkey</a>, then <a href=\"{0}\" target=\"_blank\" rel=\"noopener\">PvP Collector</a>. That is all: play as usual, and what the game shows you reaches this planner by itself, for everyone. A small badge in the game shows it is working and tells you when an update is out.": "<b>PvP Collector (lo mejor, para todo el escuadrón):</b> instala <a href=\"https://www.tampermonkey.net/\" target=\"_blank\" rel=\"noopener\">Tampermonkey</a> y luego <a href=\"{0}\" target=\"_blank\" rel=\"noopener\">PvP Collector</a>. Eso es todo: juega como siempre y lo que el juego te muestra llega solo a este planificador, para todos. Una pequeña insignia en el juego muestra que funciona y te avisa cuando hay una actualización.",
@@ -1177,6 +1184,13 @@
       'Every fight here always goes the same way: no change of build alters it.': '这里每场战斗结果都相同：改配置也无法改变。',
       '{0}% → {1}% with free changes (points, gear stats, skills). Green: what to change.': '{0}% → {1}%，只需免费调整（点数、装备属性、技能）。绿色：需要更改的项。',
       'Reach a win %': '达到目标胜率',
+      "(guess)": "（推测）",
+      "guess, from {0}": "推测，来自 {0}",
+      "Guess: since then, {0}.": "推测：此后，{0}。",
+      "{0} fought in G{1}": "{0} 在 G{1} 出战",
+      "{0} fought for {1}": "{0} 为 {1} 出战",
+      "Put in their place: {0} (seen in {1} lately, in no other group).": "替补为：{0}（最近在 {1} 出现过，且不在其他分组）。",
+      "{0} place(s) left empty: nobody else known.": "{0} 个位置空缺：没有其他已知成员。",
       "{0}'s build is from Squadron Groups {1}: a newer clone or gear is not in this chance.": "{0} 的配置来自舰队分组（{1}）：之后新增的克隆体或装备不在此胜率中。",
       "{0}'s newest fight seen is {1}: anything they changed since (gear, a new clone) is not in this chance.": "{0} 最近一次被看到的战斗是 {1}：此后的任何变化（装备、新克隆体）都不在此胜率中。",
       "<b>PvP Collector (best, for the whole squadron):</b> install <a href=\"https://www.tampermonkey.net/\" target=\"_blank\" rel=\"noopener\">Tampermonkey</a>, then <a href=\"{0}\" target=\"_blank\" rel=\"noopener\">PvP Collector</a>. That is all: play as usual, and what the game shows you reaches this planner by itself, for everyone. A small badge in the game shows it is working and tells you when an update is out.": "<b>PvP Collector（最佳，全舰队共享）：</b>安装 <a href=\"https://www.tampermonkey.net/\" target=\"_blank\" rel=\"noopener\">Tampermonkey</a>，再安装 <a href=\"{0}\" target=\"_blank\" rel=\"noopener\">PvP Collector</a>。就这样：照常游戏，游戏显示给你的内容会自动发送到这个规划器，所有人共享。游戏里的小标记会显示它在工作，并在有更新时提醒你。",
@@ -4062,9 +4076,31 @@
     } catch (e) {}
     return SQ_ROS.m;
   }
+  // Enemy groups (1.14.0): a line-up seen in an older battle is corrected by newer ones.
+  // A player is in one group at a time, so whoever was seen later in another group has
+  // moved and is taken out; the places left are filled with players of that squadron
+  // seen recently and in no other group, newest first. Such a line-up is a guess (g.guess).
+  var SQ_FG = { x: null, out: [] };
   function sqgFoeGroups() {
     if (!IMP || !IMP.x.groups) return [];
-    return IMP.x.groups.filter(function (g) { return !g.own && g.m && g.m.length; });
+    if (SQ_FG.x === IMP.x) return SQ_FG.out;
+    var all = IMP.x.groups.filter(function (g) { return !g.own && g.m && g.m.length; });
+    var at = {};   // where each player was seen last: { g, t }
+    all.forEach(function (g) { g.m.forEach(function (u) { if (!at[u] || g.t > at[u].t) at[u] = { g: g, t: g.t }; }); });
+    var out = all.map(function (g) {
+      var moved = g.m.filter(function (u) { return at[u].g !== g; });
+      if (!moved.length) return g;
+      var keep = g.m.filter(function (u) { return at[u].g === g; }), want = g.m.length - keep.length, added = [];
+      // the same squadron's players seen in a battle, in no group seen after this line-up
+      var spare = (IMP.x.players || []).filter(function (p) {
+        return p.sq === g.sq && !p.own && keep.indexOf(p.name) < 0 && (!at[p.name] || at[p.name].g === g || at[p.name].t < g.t) && Date.now() - (p.t || 0) < 7 * 86400000;
+      }).sort(function (a, b) { return (b.t || 0) - (a.t || 0); });
+      spare.forEach(function (p) { if (added.length < want) added.push(p.name); });
+      return { sq: g.sq, g: g.g, own: 0, n: g.n, t: g.t, ord: g.ord, m: keep.concat(added),
+        guess: { m0: g.m.slice(), moved: moved.map(function (u) { return [u, at[u].g.sq === g.sq ? at[u].g.g : 0, at[u].g.sq]; }), added: added, missing: want - added.length } };
+    }).filter(function (g) { return g.m.length; });
+    SQ_FG.x = IMP.x; SQ_FG.out = out;
+    return out;
   }
   function sqgKey(g) { return g.sq + '|' + g.g; }
   function sqgChosen() {
@@ -4203,7 +4239,7 @@
     return '<select id="f_sqfoe">' + sqs.map(function (s) {
       return '<optgroup label="' + esc(s) + '">' + by[s].sort(function (a, b) { return a.g - b.g; }).map(function (g) {
         var k = sqgKey(g);
-        return '<option value="' + esc(k) + '"' + (cur && k === sqgKey(cur) ? ' selected' : '') + '>' + esc(t('G{0}', [g.g]) + ' · ' + g.m.slice(0, 4).join(', ') + (g.m.length > 4 ? '…' : '') + ' · ' + t('updated {0}', [ago(g.t)])) + '</option>';
+        return '<option value="' + esc(k) + '"' + (cur && k === sqgKey(cur) ? ' selected' : '') + '>' + esc(t('G{0}', [g.g]) + ' · ' + g.m.slice(0, 4).join(', ') + (g.m.length > 4 ? '…' : '') + ' · ' + (g.guess ? t('guess, from {0}', [ago(g.t)]) : t('updated {0}', [ago(g.t)]))) + '</option>';
       }).join('') + '</optgroup>';
     }).join('') + '</select>';
   }
@@ -4236,18 +4272,23 @@
   function sqvFoePanel(foe, max, res) {
     var h = '<div class="card ar"><div class="arh">' + esc(t('Enemy group')) + '</div>';
     if (!foe) return h + line(t('No enemy group in your battles yet.'), 'warn') + '</div>';
-    h += '<div class="arn">' + esc(foe.sq + ' · ' + t('G{0}', [foe.g])) + '</div>';
-    var k = 0, weak = 0;
+    h += '<div class="arn">' + esc(foe.sq + ' · ' + t('G{0}', [foe.g])) + (foe.guess ? ' <span class="warn">' + esc(t('(guess)')) + '</span>' : '') + '</div>';
+    var k = 0, weak = 0, gs = foe.guess;
     foe.m.forEach(function (name, i) {
       var c = vsCard(name), x = c ? sqgFoeMember(name) : null, kk = x ? k++ : -1;
       var shots = c ? Math.min(c.P ? c.P[2] || 0 : 0, c.E ? c.E[2] || 0 : 0) : 0, doubt = c && !c.mate && shots < 30;
       if (doubt) weak++;
-      h += '<div class="sqrow' + (c ? '' : ' off') + '"><span class="sqnm"><b>' + (i + 1) + '. ' + esc(name) + '</b>' + (doubt ? ' <span class="warn" title="' + esc(t('Weak estimate: precision and evasion lean on the usual gear split.')) + '">?</span>' : '') +
+      h += '<div class="sqrow' + (c ? '' : ' off') + '"><span class="sqnm"><b>' + (i + 1) + '. ' + esc(name) + '</b>' + (gs && gs.added.indexOf(name) >= 0 ? ' <span class="warn">' + esc(t('(guess)')) + '</span>' : '') + (doubt ? ' <span class="warn" title="' + esc(t('Weak estimate: precision and evasion lean on the usual gear split.')) + '">?</span>' : '') +
         '<span class="mu sqst">' + esc(c ? t('{0} damage · {1} HP', [sqgK(c.d), sqgK(c.h * (c.n || 1))]) + '' : t('no build yet')) + '</span>' + (c && !c.mate ? '<span class="mu sqst">' + esc(t('updated {0}', [plLast(c) ? ago(plLast(c)) : '?'])) + '</span>' : '') + '</span>' +
         (x ? sqvBar(gbStr(x), max) : '<span class="sqbw"></span>') + (res && x ? sqvBeats(res.kE[kk]) : '') + '</div>';
     });
     var old = vsOld(foe.t);
     h += line(t('Line-up from your last battle with them, {0} · met {1}x.', [ago(foe.t), foe.n]), old ? 'warn' : 'mu');
+    if (gs) {
+      h += line('⚠ ' + t('Guess: since then, {0}.', [gs.moved.map(function (x) { return x[1] ? t('{0} fought in G{1}', [x[0], x[1]]) : t('{0} fought for {1}', [x[0], x[2]]); }).join(', ')]) +
+        (gs.added.length ? ' ' + t('Put in their place: {0} (seen in {1} lately, in no other group).', [gs.added.join(', '), foe.sq]) : '') +
+        (gs.missing ? ' ' + t('{0} place(s) left empty: nobody else known.', [gs.missing]) : ''), 'warn');
+    }
     if (old) h += line(t('Old line-up: they may have changed members or builds since.'), 'warn');
     if (weak) h += line(t('? = weak estimate ({0} of {1} members): few shots seen.', [weak, foe.m.length]), 'mu');
     return h + '</div>';
