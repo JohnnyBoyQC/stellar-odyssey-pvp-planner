@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stellar Odyssey – PvP Collector
 // @namespace    stellarodyssey-pvpcollector
-// @version      1.0.0
+// @version      1.1.0
 // @description  Keeps your squadron's PvP Build Planner up to date: listens to what the game page loads (battles, Arena, Squadron Groups, map) and sends it to the planner's shared store. No requests to the game, no clicks, no game actions.
 // @match        *://steam.stellarodyssey.app/*
 // @grant        GM_getValue
@@ -23,9 +23,9 @@
   if (MARK && MARK.getAttribute('data-sopvp-col')) { try { window.dispatchEvent(new CustomEvent('sopvp-col-show')); } catch (e) {} return; }
   if (MARK) MARK.setAttribute('data-sopvp-col', '1');
 
-  var COL_VER = "1.0.0";
+  var COL_VER = "1.1.0";
   /* ============================================================
-     PvP Collector for Stellar Odyssey (1.0.0)
+     PvP Collector for Stellar Odyssey (1.1.0)
 
      Keeps what the game page itself loads while you play (squadron battle
      logs, Arena duels and the Arena list, Squadron Groups, the member list,
@@ -81,6 +81,7 @@
   if (!Array.isArray(S.battles)) S.battles = [];
   S.inputs.live = false;
   var DIRECT_FETCH = typeof GM_xmlhttpRequest !== 'function';   // the bookmarklet sends with fetch
+  var KEEP_PUSH = false;   // keep the battle / attack notices the game pushes (PvP Meta only)
   function setErr(msg) { S.lastErr = msg || null; S.lastErrAt = msg ? Date.now() : 0; }
   function saveInputs() { store.set('inputs', S.inputs); }
   function scriptVersion() { return COL_VER; }
@@ -305,6 +306,7 @@
   // when its log-likelihood gain (x2) passes that test's threshold, set from
   // the no-change spread in cp_test.js (about 2 false alarms in 100 players
   // with no change, for each test). Each observation carries its fight time.
+  var PX_FADE = { hl: 0 };   // half-life of old fights in ms; 0 = every fight counts the same
   var PX_CP_THP = 14, PX_CP_THK = 17, PX_CP_MIN = 60, PX_CP_SPLITS = 40;
   function pxLLp(obs) {
     if (!obs.length) return 0;
@@ -399,6 +401,8 @@
     // The shared store holds every visitor's roster: only the ones with our
     // own name in them are ours (all of them when our name is not known).
     if (me) { var mine = rosters.filter(function (r) { return r.m.some(function (m) { return m.user === me; }); }); if (mine.length) rosters = mine; }
+    // Each member's own build, sent by their own collector, is exact while it was seen.
+    rosters = pxPatchRosters(rosters, arc.builds);
     function rosterAt(t) {
       if (!rosters.length) return null;
       var pick = rosters[0];
@@ -415,6 +419,17 @@
     });
     var own = null;
     Object.keys(sqCount).forEach(function (k) { if (own === null || sqCount[k] > sqCount[own]) own = k; });
+    // The shared store holds everyone's battles, so "the most frequent squadron" may be
+    // another one: ours is the side our own name (or our roster's names) fights on.
+    var mineCount = {}, isOurs = function (u) { return u === me || ownNames[u]; };
+    if (me || rosters.length) battles.forEach(function (b) {
+      [[b.attacking_members, b.attacking_squadron], [b.defending_members, b.defending_squadron]].forEach(function (z) {
+        if (z[1] && z[1].name && pxMembers(z[0]).some(function (m) { return isOurs(m.user); })) mineCount[z[1].name] = (mineCount[z[1].name] || 0) + 1;
+      });
+    });
+    var own2 = null;
+    Object.keys(mineCount).forEach(function (k) { if (own2 === null || mineCount[k] > mineCount[own2]) own2 = k; });
+    if (own2) own = own2;
 
     var players = {}, groups = {}, summaries = [], snapsOf = {};
     function P(u) { return players[u] || (players[u] = { name: u, sq: null, t: 0, nb: 0, nd: 0, snaps: [] }); }
@@ -486,19 +501,32 @@
 
     // One card per player: the latest build seen, and the estimates from
     // that build's battles when they are enough, else from all of them.
+    // Old fights can fade: a fight PX_FADE.hl older than the newest one in the
+    // archive counts half, two half-lives a quarter. OFF (hl 0) since 1.13.0:
+    // replayed on 40 real Arena results it did not predict better (arena_check.js
+    // FADE_DAYS=7 re-tests it as more results come in).
+    var tRef = 0;
+    summaries.forEach(function (x) { if (x.t > tRef) tRef = x.t; });
+    (duels || []).forEach(function (r) { if (r && r.t > tRef) tRef = r.t; });
+    var fade = function (t) { return PX_FADE.hl > 0 && tRef > t ? Math.pow(0.5, (tRef - t) / PX_FADE.hl) : 1; };
+    var fadeObs = function (list) { return list.map(function (o) { var w = fade(o[3]); return [o[0], o[1] * w, o[2] * w, o[3]]; }); };
     var out = [], cards = [];
     function cat(which, list) { var all = []; list.forEach(function (x) { all = all.concat(x[which] || []); }); return all; }
     Object.keys(players).forEach(function (u) {
       var p = players[u];
       if (!p.snaps.length) return;
       p.snaps.sort(function (x, y) { return x.t1 - y.t1; });
-      var sq = p.snaps.filter(function (x) { return !x.duel; }), last = (sq.length ? sq : p.snaps)[(sq.length ? sq : p.snaps).length - 1];
+      // The newest fight of either kind gives clones, damage and HP (1.15.0; before, a
+      // squadron battle always won over a newer Arena duel). Both carry the game's own
+      // numbers on the same scale. Crit and dual stay from the newest squadron battle
+      // (many more shots), a duel's own estimate only when there is none.
+      var sq = p.snaps.filter(function (x) { return !x.duel; }), last = p.snaps[p.snaps.length - 1], lastSq = sq.length ? sq[sq.length - 1] : null;
       // Shares of power + hull stay comparable across growth, so every snapshot is
       // used (a hidden reallocation is still caught by pxSplit below).
       var used = p.snaps, mixed = 0;
       // A hidden change inside the fights used (pxSplit).
       var oP = cat('p', used), oE = cat('e', used), oK = cat('skl', p.snaps);
-      cards.push({ u: u, p: p, last: last, mixed: mixed, oP: oP, oE: oE, oK: oK, chg: ownNames[u] ? null : pxSplit(oP, oE, oK) });
+      cards.push({ u: u, p: p, last: last, lastSq: lastSq, mixed: mixed, oP: oP, oE: oE, oK: oK, chg: ownNames[u] ? null : pxSplit(oP, oE, oK) });
     });
     // A jump in hit or dodge rates at the same time for several players is a
     // change on OUR side (our members got stronger and the roster on file is
@@ -506,21 +534,24 @@
     // depend on our stats and are kept.
     pxMarkOurs(cards);
     cards.forEach(function (c) {
-      var p = c.p, last = c.last, chg = c.ours ? null : c.chg, oP = c.oP, oE = c.oE, oK = c.oK, u = c.u;
+      var p = c.p, last = c.last, lastSq = c.lastSq, chg = c.ours ? null : c.chg, oP = c.oP, oE = c.oE, oK = c.oK, u = c.u;
       if (chg) {
         oP = oP.filter(function (o) { return o[3] >= chg.t; }); oE = oE.filter(function (o) { return o[3] >= chg.t; });
         oK = oK.filter(function (x) { return x[0] >= chg.t; });
       }
       var GL = pxGear(last.d, last.h, last.n) || 1, shp = pxShape(last.d, last.h, last.n);
+      var raw = Math.min(pxTries(oP), pxTries(oE));
+      oP = fadeObs(oP); oE = fadeObs(oE);
       var pp = pxFit(oP, [shp.p, shp.W / 2, shp.W]), ee = pxFit(oE, [shp.e, shp.W / 2, shp.W]);
-      var skk = {}; oK.forEach(function (x) { pxSumSk(skk, x[1]); });
+      var skk = {}; oK.forEach(function (x) { var w = fade(x[0]), o = {}; Object.keys(x[1]).forEach(function (k) { o[k] = x[1][k] * w; }); pxSumSk(skk, o); });
       var sk = skk.L || skk.blkT ? pxSkills({ L: skk.L || 0, dot: skk.dot || 0, focus: skk.focus || 0, stunT: skk.stunT || 0, stun: skk.stun || 0, blkT: skk.blkT || 0, blk: skk.blk || 0 }) : null;
-      var cl = last.cl;
+      // crit and dual: a squadron battle reads them from many more shots than one duel
+      var cl = last.cl || (lastSq && lastSq.cl) || null;
       if (!cl && last.c) cl = last.c.map(function (x) { return [x[0], x[1], x[2]]; });
       // [value now (share x current power + hull), doubt (log scale), real swings, share]
       function r3(f) { return f ? [Math.round(f.v * GL), Math.round(f.se * 1000) / 1000, f.n, Math.round(f.v * 10000) / 10000] : null; }
       out.push({ bt: chg ? Math.max(chg.t, last.t0) : last.t0, bl: last.t1, chg: chg ? chg.t : 0, chgw: chg ? chg.what : '', ours: c.ours ? c.chg.t : 0, name: u, sq: p.sq, g: p.g || 0, own: ownNames[u] || p.sq === own ? 1 : 0, t: p.t, nb: p.nb, nd: p.nd, snaps: p.snaps.length, mixed: c.mixed,
-        d: last.d, h: last.h, n: last.n, cl: cl || [[0, 0, 0]], P: r3(pp), E: r3(ee), sk: sk ? sk.s : null, skc: sk ? sk.conf : 0, skn: sk ? sk.n : 0 });
+        d: last.d, h: last.h, n: last.n, cl: cl || [[0, 0, 0]], P: r3(pp), E: r3(ee), ns: raw, tRef: tRef, sk: sk ? sk.s : null, skc: sk ? sk.conf : 0, skn: sk ? sk.n : 0 });
     });
     out.sort(function (x, y) { return y.t - x.t; });
     var rs = rosters.length ? rosters[rosters.length - 1] : null;
@@ -536,19 +567,23 @@
   // our own precision and evasion, so arDraws spreads the opponent by exactly
   // the doubt in the estimate. Unknown precision or evasion falls back on the
   // meta split (15% of the total next to 35% power) with very wide doubt.
+  var PX_SE = { min: 0.02 };   // the smallest doubt an estimated precision or evasion is given
   function pxRecord(card, myP, myE, k) {
     var N = card.n || 1, pow = card.d / N, hull = card.h / (7 * N);
     // No estimate at all (an old share file): the gear-based first guess (1.11.0;
     // was 15/35 of the mean of power and hull, half the real value).
     var shp = pxShape(card.d, card.h, N), G = pow + hull;
     function q(f, ref, kind) {
-      var v = f ? (f[3] ? f[3] * G : f[0]) : Math.max(20, (kind === 'p' ? shp.p : shp.e) * G), se = f ? Math.max(0.02, f[1]) : 0.6;
+      var v = f ? (f[3] ? f[3] * G : f[0]) : Math.max(20, (kind === 'p' ? shp.p : shp.e) * G), se = f ? Math.max(PX_SE.min, f[1]) : 0.6;
       var p = kind === 'p' ? v / (v + ref) : ref / (ref + v), n = Math.max(4, Math.round(1 / (se * se * p * (1 - p))));
       return [Math.round(p * n), n, v];
     }
     var qp = q(card.P, myE, 'p'), qe = q(card.E, myP, 'e');
     var sk = card.sk || [0, 0, 0, 4];
-    return { v: 3, t: card.t || 0, i: 'vs|' + card.name + '|' + (k || 0), w: 0, f: 0, r: 0, nm: card.name,
+    // The id carries the card's numbers: a card that changed (new fights from the shared
+    // store) is a new opponent for the plan memo, not the chance worked out before.
+    var sig = [card.t || 0, card.d, card.h, N, Math.round(qp[2]), Math.round(qe[2]), qp[1], qe[1], sk.join('.')].join(',');
+    return { v: 3, t: card.t || 0, i: 'vs|' + card.name + '|' + (k || 0) + '|' + sig, w: 0, f: 0, r: 0, nm: card.name,
       o: { p: myP, e: myE },
       e: { n: N, d: card.d, h: card.h, p: Math.round(qp[2]), e: Math.round(qe[2]),
         s: [sk[0] * 5, sk[1] * 2.5, sk[2] * 5, sk[3] * 5],
@@ -714,6 +749,85 @@
   function dirEntries(D) { return Object.keys(D || {}).map(function (k) { return D[k]; }); }
   function dirVal(e, x) { return e && e.f[x] ? e.f[x][0] : null; }
 
+  /* ---- rosters made small, and each member's own build (collector 1.1.0) ---- */
+  // A roster member cut down to its PvP part (all the planner reads): the same build
+  // always gives the same text, whatever the XP counters say, so it is kept once.
+  function pxSlimMember(m) {
+    if (!m || typeof m !== 'object' || !m.username) return null;
+    var ps = m.pvpstats || {}, lv = m.levels || {}, vp = m.velari_pet, n0 = function (v) { return pxNum(v) || 0; };
+    var craft = pxNum(lv.crafting_level);
+    if (craft === null && lv.crafting && typeof lv.crafting === 'object') craft = pxNum(lv.crafting.level);
+    var o = { username: String(m.username), active: m.active !== false,
+      pvpstats: { power: n0(ps.power), precision: n0(ps.precision), evasion: n0(ps.evasion), hull: n0(ps.hull), available: n0(ps.available) },
+      pvp_gear: (Array.isArray(m.pvp_gear) ? m.pvp_gear : []).slice(0, 12).map(function (x) {
+        x = x || {};
+        return { name: String(x.name || ''), stat: String(x.stat || ''), skill: String(x.skill || ''), statLevel: n0(x.statLevel), statTier: n0(x.statTier), statCost: String(x.statCost || '') };
+      }),
+      clones: (Array.isArray(m.clones) ? m.clones : []).slice(0, 50).map(function (c) { c = c || {}; return { critical_chance: n0(c.critical_chance), critical_damage: n0(c.critical_damage), dual_shot: n0(c.dual_shot) }; }),
+      levels: { crafting_level: craft || 0, battling_level: n0(lv.battling_level) },
+      velari_pet: vp && vp.equipped ? { level: n0(vp.level), equipped: true } : null };
+    return o;
+  }
+  // A Squadron Groups answer (text) made small; null when it is not one.
+  function pxSlimRoster(text) {
+    try {
+      var b = typeof text === 'string' ? JSON.parse(text) : text, q = b && Array.isArray(b.squad) ? b.squad[0] : b;
+      if (!q || !Array.isArray(q.group1)) return null;
+      var o = {};
+      ['group1', 'group2', 'group3', 'available'].forEach(function (g) { o[g] = (Array.isArray(q[g]) ? q[g] : []).map(pxSlimMember).filter(Boolean); });
+      return JSON.stringify({ squad: [o] });
+    } catch (e) { return null; }
+  }
+  // Own builds: { t0, t, sq, m } = this member's own collector saw build m (a slim
+  // member) from t0 to t. Between those times it is exact, whatever the roster on file
+  // says: the member's line in every roster of that period is replaced, and a snapshot
+  // is added at t0 so fights after a change use the new build at once.
+  var PX_UB_SLACK = 3600000;   // a build still counts for an hour after it was last confirmed
+  function pxPatchRosters(rosters, builds) {
+    if (!rosters.length || !Array.isArray(builds) || !builds.length) return rosters;
+    var by = {};
+    builds.forEach(function (b) {
+      if (!b || !b.m || !b.m.username || !(b.t > 0)) return;
+      (by[b.m.username] || (by[b.m.username] = [])).push({ t0: b.t0 > 0 ? Math.min(b.t0, b.t) : b.t, t: b.t, m: b.m });
+    });
+    var users = Object.keys(by);
+    if (!users.length) return rosters;
+    users.forEach(function (u) { by[u].sort(function (x, y) { return x.t0 - y.t0; }); });
+    function at(u, t) {
+      var l = by[u], pick = null;
+      if (!l) return null;
+      l.forEach(function (b) { if (b.t0 <= t) pick = b; });
+      return pick && t <= pick.t + PX_UB_SLACK ? pick : null;
+    }
+    var out = rosters.map(function (r) { return { t: r.t, m: r.m }; });
+    users.forEach(function (u) {
+      by[u].forEach(function (b) {
+        var base = null;
+        rosters.forEach(function (r) { if (r.t <= b.t0) base = r; });
+        if (base && base.t < b.t0 && base.m.some(function (m) { return m.user === u; })) out.push({ t: b.t0, m: base.m, syn: 1 });
+      });
+    });
+    out.sort(function (x, y) { return x.t - y.t; });
+    out.forEach(function (r) {
+      var ch = false, mm = r.m.map(function (m) {
+        var b = at(m.user, r.t);
+        if (!b) return m;
+        var n = pxRosterMember(b.m, m.g, m.pos);
+        n.active = m.active; n.ft = b.t; n.ub = 1; ch = true;
+        return n;
+      });
+      if (ch) r.m = mm;
+    });
+    return out;
+  }
+
+  // A duel record's key. The game's duel id alone made the two fighters' records of one
+  // duel the same item, and the second was dropped: with the viewer's name (on) both stay.
+  function arKey(rec) {
+    if (rec.i) return rec.on ? rec.i + '|' + rec.on : rec.i;
+    return rec.r + '|' + rec.w + '|' + rec.o.d + ':' + rec.o.h + '|' + rec.e.d + ':' + rec.e.h;
+  }
+
   /* ============================================================
      OPEN IN PLANNER (1.2.0)
 
@@ -746,6 +860,7 @@
       return;
     }
     rec.nm = String(d.attackerName === me ? d.defenderName : d.attackerName);
+    rec.on = String(me);
     recSeen = fp;
     var key = arKey(rec);
     if (S.battles.some(function (r) { return arKey(r) === key; })) return;
@@ -857,11 +972,11 @@
      ============================================================ */
 
   var CL_URL = 'https://sopvp-planner.stellar-pvp.workers.dev/add';
-  var DIRECT = { busy: false, dirty: true, last: 0, ok: 0, err: null, sent: 0, wait: 0 };
+  var DIRECT = { busy: false, dirty: true, last: 0, ok: 0, err: null, sent: 0, wait: 0, liveKey: null, noRec: {} };
   // DIRECT_FETCH (Collector bookmarklet, 1.12.0): no script manager, so a plain fetch from
   // the game page to the store (which allows the game's origin).
   function directOn() { return S.inputs.direct === true && (typeof GM_xmlhttpRequest === 'function' || DIRECT_FETCH); }
-  function directSent() { var s = store.get('sent', null) || {}; ['b', 'd', 'r', 'l', 'm', 'x', 't'].forEach(function (k) { if (!s[k]) s[k] = {}; }); return s; }
+  function directSent() { var s = store.get('sent', null) || {}; ['b', 'd', 'r', 'l', 'x', 't'].forEach(function (k) { if (!s[k]) s[k] = {}; }); delete s.m; return s; }
   function directPost(body) {
     if (typeof GM_xmlhttpRequest !== 'function' && DIRECT_FETCH) {
       return fetch(CL_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-SOPVP-Client': 'pvpmeta' }, body: JSON.stringify(body), credentials: 'omit' })
@@ -876,59 +991,187 @@
       } catch (e) { no(e); }
     });
   }
+  /* What the store has not confirmed yet (1.7.0 / collector 1.1.0). Only the unsent
+     items are read from the archive (before, every push loaded every kept battle and
+     worked out every player card just to find the few new ones). */
+  var DIRECT_CAP = { squad: 25, duel: 60, roster: 30, map: 60 };
+  var UB_EVERY = 30 * 60000, MEM_EVERY = 6 * 3600000;
+  function arcKeysOf(st) {
+    return arcTx(st, 'readonly', function (os) { return os.getAllKeys(); }).then(function (ks) {
+      return (ks || []).map(String).filter(function (k) { return k.indexOf(REALM + '|') === 0; });
+    }, function () { return []; });
+  }
+  function arcGetMany(st, keys) {
+    if (!keys.length) return Promise.resolve([]);
+    return arcTx(st, 'readonly', function (os) {
+      var out = [];
+      keys.forEach(function (k) { var g = os.get(k); g.onsuccess = function () { if (g.result) out.push(g.result); }; });
+      return out;
+    }).catch(function () { return []; });
+  }
+  // Snapshot keys are "realm|time"; the time kept inside may be a millisecond later.
+  function keyT(k) { return Number(String(k).slice(REALM.length + 1)) || 0; }
+  function sentAt(o, t) { return !!(o[t] || o[t + 1] || o[t + 2] || o[t + 3]); }
+  // This player's own PvP build as the open game page holds it (a slim roster member).
+  function ubNow(st) {
+    try {
+      var pv = readPvp(st);
+      if (!pv || !st.UserStore.username) return null;
+      // Crafting level and the Velari pet come from other parts of the page. While those are
+      // not loaded the build would read weaker than it is (and replace the right roster line):
+      // nothing is sent until both are there.
+      if (!st.CraftStore || typeof st.CraftStore.crafting_level !== 'number' || !st.PetsStore || !Array.isArray(st.PetsStore.pets) || !Array.isArray(st.PetsStore.petSlots)) return null;
+      var P = st.UserStore.player, vel = Math.round(pv.vel / 50), q = st.UserStore.squadron;
+      var m = pxSlimMember({ username: st.UserStore.username, active: true, pvpstats: P.pvpstats, pvp_gear: P.pvp_gear, clones: P.clones,
+        levels: { crafting_level: pv.craft }, velari_pet: vel ? { level: vel, equipped: true } : null });
+      return m ? { sq: String((q && q.name) || '').slice(0, 80), m: m } : null;
+    } catch (e) { return null; }
+  }
+  // The build on file here: its text, since when (t0), and when the store last took it.
+  function ubState(st) {
+    var cur = st ? ubNow(st) : null;
+    if (!cur) return null;
+    var k = JSON.stringify(cur.m), ub = store.get('ub', null), now = Date.now();
+    if (!ub || ub.k !== k || !(ub.t0 > 0) || ub.t0 > now) { ub = { k: k, t0: now, at: 0 }; store.set('ub', ub); }
+    return { ub: ub, cur: cur };
+  }
+  function directData(sent) {
+    var live = recState() || S.storeState, me = live && live.UserStore && live.UserStore.username, pv = live ? readPvp(live) : null, now = Date.now();
+    var out = { squad: [], recs: [], roster: [], dlist: [], members: [], dir: [], map: [], builds: [], more: false, keys: null, liveKey: null, liveT: 0, memKey: null };
+    if (!DIRECT.noRec) DIRECT.noRec = {};
+    return Promise.all([arcKeysOf('squad'), arcKeysOf('duel'), arcKeysOf('roster'), arcKeysOf('map'),
+      arcTx('duelList', 'readonly', function (os) { return os.getAll(); }).catch(function () { return []; })]).then(function (K) {
+      var id = function (k) { return k.slice(REALM.length + 1); };
+      var kb = K[0].filter(function (k) { return !sent.b[id(k)]; });
+      var kd = K[1].filter(function (k) { return !sent.d[id(k)] && !DIRECT.noRec[id(k)]; });
+      var kr = K[2].filter(function (k) { return !sentAt(sent.r, keyT(k)); }).sort();
+      var km = K[3].filter(function (k) { return !sentAt(sent.t, keyT(k)); }).sort().slice(-DIRECT_CAP.map);
+      var newestR = K[2].slice().sort().pop();
+      out.keys = { r: K[2].map(keyT), t: K[3].map(keyT) };
+      if (kb.length > DIRECT_CAP.squad || kd.length > DIRECT_CAP.duel || kr.length > DIRECT_CAP.roster) out.more = true;
+      // The Arena list rows (who won, both Elo; no log), made small.
+      out.dlist = (K[4] || []).filter(function (x) { return x && x.realm === REALM; }).map(function (x) {
+        var r = x.row;
+        if (r && r.src === 'n' && r.i && r.a && r.d) return r;   // from an Arena notification
+        if (!r || !r._id || !r.attackerName || !r.defenderName) return null;
+        var w = r.winner === r.attackerName || (r.attacker && r.winner === r.attacker) ? 'a' : (r.winner === r.defenderName || (r.defender && r.winner === r.defender) ? 'd' : '');
+        return { i: String(r._id), t: (Number(r.created) || 0) * 1000, a: String(r.attackerName), d: String(r.defenderName), ae: Number(r.attackerElo) || 0, de: Number(r.defenderElo) || 0, dl: Number(r.eloDelta) || 0, w: w };
+      }).filter(function (r) { return r && !sent.l[r.i]; });
+      return Promise.all([arcGetMany('squad', kb.slice(0, DIRECT_CAP.squad)), arcGetMany('duel', kd.slice(0, DIRECT_CAP.duel)),
+        arcGetMany('roster', kr.slice(0, DIRECT_CAP.roster)), arcGetMany('map', km), arcGetMany('roster', newestR && kr.indexOf(newestR) < 0 ? [newestR] : [])]);
+    }).then(function (V) {
+      out.squad = V[0].filter(function (x) { return x && x.battle && x.battle._id; });
+      // Duels: the ones recorded as they were seen, then the opened ones kept whole.
+      var seen = {};
+      S.battles.forEach(function (r) { if (r && r.nm && r.o && r.e) seen[arKey(r)] = r; });
+      V[1].forEach(function (x) {
+        var d = x && x.duel;
+        if (!d || !d._id) return;
+        if (seen[d._id] || seen[d._id + '|' + me]) return;
+        var r = me ? arBuild(d, me, pv, x.saved || Date.now()) : null;
+        if (!r) { if (me && pv) DIRECT.noRec[d._id] = 1; return; }
+        r.nm = String(d.attackerName === me ? d.defenderName : d.attackerName);
+        r.on = String(me);
+        // Read against our precision and evasion as they were when the duel was kept.
+        if (x.me && x.me.p > 0 && x.me.e > 0 && r.o && r.o.p > 0 && r.o.e > 0) {
+          if (r.e.p > 0) r.e.p = Math.round(r.e.p * x.me.e / r.o.e);
+          if (r.e.e > 0) r.e.e = Math.round(r.e.e * x.me.p / r.o.p);
+          r.o.p = x.me.p; r.o.e = x.me.e;
+        }
+        seen[arKey(r)] = r;
+      });
+      out.recs = Object.keys(seen).map(function (k) { return seen[k]; }).filter(function (r) { return !sent.d[arKey(r)] && !(r.i && sent.d[r.i]); }).sort(function (x, y) { return x.t - y.t; });
+      out.roster = V[2].filter(function (r) { return r && r.body; }).map(function (r) { return { t: r.t, body: pxSlimRoster(r.body) || r.body }; });
+      out.map = V[3].map(function (x) { var b = null; try { b = JSON.parse(x.body); } catch (e) {} return b && b.map ? pxMap(b.map, b.threat, x.t) : null; }).filter(Boolean);
+      out.dir = dirEntries(ARC.D || {}).filter(function (e) { return !(sent.x[e.k + '|' + e.id] >= e.t); });
+      if (live) {
+        // Squadron Groups as the page holds it: sent only when it differs from the game's
+        // last answer kept here (the same content is that answer, already sent with its
+        // own time: stamping it "now" would make old builds look fresh).
+        var lastBody = (V[4][0] || V[2][V[2].length - 1] || {}).body || null, lv = sqLive(live, lastBody);
+        if (lv) {
+          var lk = arcRosterKey(lv.body);
+          if (lk !== arcLastSnap.roster && lk !== DIRECT.liveKey) { out.liveKey = lk; out.liveT = lv.t; out.roster.push({ t: lv.t, body: pxSlimRoster(lv.body) || lv.body }); }
+        }
+        // The member list: when it changed, or every few hours.
+        var mem = sqNames(live)[0], ms = store.get('mem', null) || {};
+        if (mem) { var mk = mem.sq + '|' + mem.names.join(','); if (mk !== ms.k || now - (ms.at || 0) > MEM_EVERY) { out.memKey = mk; out.members.push(mem); } }
+        // Our own build: at once when it changed, else a confirmation every half hour.
+        var u = ubState(live);
+        if (u && now - (u.ub.at || 0) > UB_EVERY) out.builds.push({ t0: u.ub.t0, t: now, sq: u.cur.sq, m: u.cur.m });
+      }
+      return out;
+    });
+  }
   function directPush() {
     if (!directOn() || DIRECT.busy) return Promise.resolve();
     DIRECT.busy = true; DIRECT.dirty = false; DIRECT.last = Date.now();
-    return plPayload().then(function (obj) {
-      var sent = directSent(), raw = obj.raw || {};
-      var squad = (raw.squad || []).filter(function (x) { return x.battle && x.battle._id && !sent.b[x.battle._id]; });
-      var recs = (obj.duels || []).filter(function (r) { return r && r.nm && r.o && r.e && !sent.d[r.i || arKey(r)]; });
-      var roster = (raw.roster || []).filter(function (r) { return r.body && !sent.r[r.t]; });
-      var dlist = (raw.dlist || []).filter(function (r) { return r.i && !sent.l[r.i]; });
-      var members = (raw.members || []).filter(function (r) { return !sent.m[r.sq + '|' + r.t]; });
-      var dir = (raw.dir || []).filter(function (e) { return !(sent.x[e.k + '|' + e.id] >= e.t); });
-      var map = (raw.map || []).filter(function (m) { return !sent.t[m.t]; });
+    var sent = directSent();
+    return directData(sent).then(function (D) {
       // Batches under the store's limits, battles first.
-      var mk = function () { return { realm: REALM, squad: [], recs: [], roster: [], dlist: [], members: [], dir: [], map: [] }; };
-      var LIM = { squad: 300, recs: 300, roster: 30, dlist: 1500, members: 8, dir: 3000, map: 150 };
+      var mk = function () { return { realm: REALM, squad: [], recs: [], roster: [], dlist: [], members: [], dir: [], map: [], builds: [] }; };
+      var LIM = { squad: 300, recs: 300, roster: 30, dlist: 1500, members: 8, dir: 3000, map: 150, builds: 5 };
       var batches = [], cur = mk(), size = 0;
       function put(kind, x) {
         var n = JSON.stringify(x).length;
         if (cur[kind].length >= LIM[kind] || (size + n > 3 * 1024 * 1024 && size > 0)) { batches.push(cur); cur = mk(); size = 0; }
         cur[kind].push(x); size += n;
       }
-      squad.forEach(function (x) { put('squad', { battle: x.battle }); });
-      roster.forEach(function (r) { put('roster', { t: r.t, body: r.body }); });
-      recs.forEach(function (r) { put('recs', r); });
-      dlist.forEach(function (r) { put('dlist', { i: r.i, t: r.t, a: r.a, d: r.d, ae: r.ae, de: r.de, dl: r.dl, w: r.w }); });
-      members.forEach(function (r) { put('members', { t: r.t, sq: r.sq, names: r.names }); });
-      dir.forEach(function (e) { put('dir', { k: e.k, id: e.id, t: e.t, f: e.f }); });
-      map.forEach(function (m) { put('map', { t: m.t, tiles: m.tiles }); });
+      D.squad.forEach(function (x) { put('squad', { battle: x.battle }); });
+      D.roster.forEach(function (r) { put('roster', { t: r.t, body: r.body }); });
+      D.builds.forEach(function (b) { put('builds', b); });
+      D.recs.forEach(function (r) { put('recs', r); });
+      D.dlist.forEach(function (r) { put('dlist', { i: r.i, t: r.t, a: r.a, d: r.d, ae: r.ae, de: r.de, dl: r.dl, w: r.w }); });
+      D.members.forEach(function (r) { put('members', { t: r.t, sq: r.sq, names: r.names }); });
+      D.dir.forEach(function (e) { put('dir', { k: e.k, id: e.id, t: e.t, f: e.f }); });
+      D.map.forEach(function (m) { put('map', { t: m.t, tiles: m.tiles }); });
       if (size > 0) batches.push(cur);
-      DIRECT.wait = squad.length + recs.length + roster.length + dlist.length + members.length + dir.length + map.length;
+      DIRECT.wait = D.squad.length + D.recs.length + D.roster.length + D.dlist.length + D.members.length + D.dir.length + D.map.length + D.builds.length;
       return batches.reduce(function (p, B) {
         return p.then(function () {
           return directPost(B).then(function (res) {
             var acc = (res && res.acc) || {}, rej = (res && res.rej) || {};
             function done(k) { var o = {}; (acc[k] || []).concat(rej[k] || []).forEach(function (v) { o[String(v)] = 1; }); return o; }
-            var ab = done('b'), ad = done('d'), ar = done('r'), al = done('l'), am = done('m'), ax = done('x'), at = done('t');
+            var ab = done('b'), ad = done('d'), ar = done('r'), al = done('l'), am = done('m'), ax = done('x'), at = done('t'), au = done('u');
             B.squad.forEach(function (x) { if (ab[x.battle._id]) { sent.b[x.battle._id] = 1; DIRECT.sent++; } });
-            B.recs.forEach(function (r) { var k = r.i || arKey(r); if (ad[String(r.i || '')] || ad[k]) { sent.d[k] = 1; DIRECT.sent++; } });
-            B.roster.forEach(function (x) { if (ar[String(x.t)]) { sent.r[x.t] = 1; DIRECT.sent++; } });
+            B.recs.forEach(function (r) { var k = arKey(r); if (ad[String(r.i || '')] || ad[k]) { sent.d[k] = 1; if (r.i) sent.d[r.i] = 1; DIRECT.sent++; } });
+            B.roster.forEach(function (x) {
+              if (!ar[String(x.t)]) return;
+              DIRECT.sent++;
+              if (x.t === D.liveT) DIRECT.liveKey = D.liveKey; else sent.r[x.t] = 1;   // the live copy is not in the archive
+            });
             B.dlist.forEach(function (r) { if (al[r.i]) { sent.l[r.i] = 1; DIRECT.sent++; } });
-            B.members.forEach(function (r) { if (am[r.sq + '|' + r.t]) sent.m[r.sq + '|' + r.t] = 1; });
+            B.members.forEach(function (r) { if (am[r.sq + '|' + r.t]) store.set('mem', { k: D.memKey, at: Date.now() }); });
             B.dir.forEach(function (e) { if (ax[e.k + '|' + e.id]) { sent.x[e.k + '|' + e.id] = e.t; DIRECT.sent++; } });
             B.map.forEach(function (m) { if (at[String(m.t)]) { sent.t[m.t] = 1; DIRECT.sent++; } });
+            B.builds.forEach(function (b) {
+              if (!au[b.m.username + '|' + b.t0]) return;
+              var ub = store.get('ub', null);
+              if (ub && ub.t0 === b.t0) { ub.at = Date.now(); store.set('ub', ub); }
+            });
             store.set('sent', sent);
           });
         });
-      }, Promise.resolve()).then(function () { DIRECT.ok = Date.now(); DIRECT.err = null; DIRECT.wait = 0; });
+      }, Promise.resolve()).then(function () {
+        DIRECT.ok = Date.now(); DIRECT.err = null; DIRECT.wait = 0;
+        if (D.more) DIRECT.dirty = true;   // more than one round's worth: the rest follows
+        // Marks of snapshots no longer kept here are dropped (the archive keeps the newest only).
+        if (D.keys) {
+          [['r', D.keys.r], ['t', D.keys.t]].forEach(function (z) {
+            if (!z[1].length) return;
+            var min = Math.min.apply(null, z[1]) - 5, o = sent[z[0]], ch = false;
+            Object.keys(o).forEach(function (k) { if (Number(k) < min) { delete o[k]; ch = true; } });
+            if (ch) store.set('sent', sent);
+          });
+        }
+      });
     }).catch(function (e) { DIRECT.err = String((e && e.message) || e); DIRECT.dirty = true; })
       .then(function () { DIRECT.busy = false; if (panel.style.display !== 'none' && view === 'set') render(); });
   }
   // New data: sent within half a minute; a failure is retried every five minutes.
   setInterval(function () {
     if (!directOn()) return;
+    try { var u = ubState(recState() || S.storeState); if (u && !u.ub.at) DIRECT.dirty = true; } catch (e) {}   // our build changed
     if (DIRECT.dirty || (DIRECT.err && Date.now() - DIRECT.last > 300000) || Date.now() - DIRECT.last > 900000) directPush();
   }, 30000);
   setTimeout(function () { if (directOn()) directPush(); }, 20000);
@@ -944,7 +1187,7 @@
   }
 
   /* ============================================================
-     FROM ASTROLABE 3.22.9 (copied unchanged by the build step)
+     FROM ASTROLABE 3.22.10 (copied unchanged by the build step)
      ============================================================ */
 
   var AR_MAX = 200;
@@ -1245,11 +1488,6 @@
     } catch (e) { return null; }
   }
 
-  function arKey(rec) {
-    if (rec.i) return rec.i;
-    return rec.r + '|' + rec.w + '|' + rec.o.d + ':' + rec.o.h + '|' + rec.e.d + ':' + rec.e.h;
-  }
-
   function tile(label, value, sub, cls) {
     return '<div class="tile"><div class="tl">' + esc(label) + '</div><div class="tv' + (cls ? ' ' + cls : '') + '">' + esc(value) + '</div>' +
       (sub ? '<div class="ts">' + esc(sub) + '</div>' : '') + '</div>';
@@ -1529,6 +1767,11 @@
       .then(function () { if (panel.style.display !== 'none' && view === 'set') render(); }, function (e) { ARC.err = String((e && e.message) || e); });
   }
 
+  // Our own precision and evasion right now: kept with each duel, so its opponent is
+  // read against the build that fought it even when it is worked out days later.
+  function arcMePE(st) {
+    try { var pv = st ? readPvp(st) : null, t = pv ? pvTotals(pv) : null; return t ? { p: Math.round(t.precision), e: Math.round(t.evasion) } : null; } catch (e) { return null; }
+  }
   // A message from the game's event bus (via our hook).
   function busTake(name, v, t) {
     if (v === false || v === null || v === undefined) return;
@@ -1538,9 +1781,11 @@
     } else if (name === 'PvPArena.getOpponents' && Array.isArray(v.opponents)) {
       job = arcDirPut(REALM + '|bus:opp|' + t, { t: t, realm: REALM, url: 'bus:opponents', band: v.band, entries: pxDirOpp(v.opponents, t) });
     } else if ((name === 'PvPArena.attackPlayer' || name === 'PvPArena.getDuel') && v.duel && v.duel._id && Array.isArray(v.duel.logs) && v.duel.logs.length && (v.duel.winner || v.duel.logs[v.duel.logs.length - 1].action === 'won')) {
-      job = arcPutNew('duel', [{ k: REALM + '|' + v.duel._id, v: { realm: REALM, saved: t, duel: v.duel } }]);
+      job = arcPutNew('duel', [{ k: REALM + '|' + v.duel._id, v: { realm: REALM, saved: t, duel: v.duel, me: arcMePE(st0) } }]);
     } else if (name === 'Notification.newNotification' && v.notif) {
       job = arcNotif([v.notif], me);
+    } else if (!KEEP_PUSH) {
+      // the collector does not keep the game's pushed battle notices (nothing reads them yet)
     } else if (name === 'SocketMaster.sendUpdate/systemBattleLog' && v.data) {
       job = arcPutNew('push', [{ k: REALM + '|' + (v.data.fightId || t), v: { realm: REALM, saved: t, data: v.data } }]);
     } else if (name === 'SocketMaster.sendUpdate/systemAttackAnnouncement' && v.data) {
@@ -1561,7 +1806,7 @@
     var list; try { list = N && N.notifications; } catch (e) { return; }
     if (!Array.isArray(list) || !list.length || !me) return;
     try { list = JSON.parse(JSON.stringify(list.slice(-200))); } catch (e) { return; }
-    arcNotif(list, me).then(function (n) { if (n) { ARC.last = Date.now(); return arcCount(); } }, function () {});
+    arcNotif(list, me).then(function (n) { if (n) { ARC.last = Date.now(); DIRECT.dirty = true; return arcCount(); } }, function () {});
   }
 
   window.addEventListener('message', function (e) {
@@ -1589,8 +1834,8 @@
     arcDuelSeen = d._id;
     var copy;
     try { copy = JSON.parse(JSON.stringify(d)); } catch (e) { return; }
-    arcPutNew('duel', [{ k: REALM + '|' + d._id, v: { realm: REALM, saved: Date.now(), duel: copy } }])
-      .then(function (n) { if (n) { ARC.last = Date.now(); return arcCount(); } }, function (e) { ARC.err = String((e && e.message) || e); });
+    arcPutNew('duel', [{ k: REALM + '|' + d._id, v: { realm: REALM, saved: Date.now(), duel: copy, me: arcMePE(st) } }])
+      .then(function (n) { if (n) { ARC.last = Date.now(); DIRECT.dirty = true; return arcCount(); } }, function (e) { ARC.err = String((e && e.message) || e); });
   }
 
   /* ---- live hand-over to an open planner tab (1.5.0) ----
@@ -1752,7 +1997,7 @@
       if (ARC.err) h += '<div class="bad">' + colEsc(ARC.err) + '</div>';
       if (COL_BOOK) h += '<div class="mu row">Bookmark version: it keeps what the game loads from your click on, until this tab is closed or reloaded.</div>';
       h += '<label><input type="checkbox" id="c_on"' + (on ? ' checked' : '') + '>Send to the PvP Build Planner</label>';
-      h += '<div class="mu row">It only listens to what the game shows you and sends it to the planner\'s shared store (open to everyone with the planner link). Nothing is sent to the game and nothing is clicked.</div>';
+      h += '<div class="mu row">It only listens to what the game shows you, reads your own PvP build from the page, and sends them to the planner\'s shared store (open to everyone with the planner link). Nothing is sent to the game and nothing is clicked.</div>';
       h += '<div class="row"><a href="' + COL_URL + '" target="_blank" rel="noopener" style="color:#7fb0ff">Open the planner</a></div>';
       colBox.innerHTML = h;
       var c = colBox.querySelector('#c_on');
