@@ -1,14 +1,14 @@
-/* Stellar Odyssey – Astrolabe Collector 2.2.0 (bookmark version). Loaded by the bookmarklet on the game page. */
+/* Stellar Odyssey – Astrolabe Collector 2.2.1 (bookmark version). Loaded by the bookmarklet on the game page. */
 (function () {
   'use strict';
-  if (location.hostname === 'johnnyboyqc.github.io' || window.__ASTRO_SITE_TEST) { siteMode("2.2.0"); return; }
+  if (location.hostname === 'johnnyboyqc.github.io' || window.__ASTRO_SITE_TEST) { siteMode("2.2.1"); return; }
   var MARK = document.documentElement;
   if (MARK && MARK.getAttribute('data-sopvp-col')) { try { window.dispatchEvent(new CustomEvent('sopvp-col-show')); } catch (e) {} return; }
   if (MARK) MARK.setAttribute('data-sopvp-col', '1');
 
-  var COL_VER = "2.2.0";
+  var COL_VER = "2.2.1";
   /* ============================================================
-     Astrolabe Collector for Stellar Odyssey (2.2.0; it was the PvP Collector)
+     Astrolabe Collector for Stellar Odyssey (2.2.1; it was the PvP Collector)
 
      Keeps what the game page itself loads while you play (squadron battle
      logs, Arena duels and the Arena list, Squadron Groups, the member list,
@@ -53,7 +53,10 @@
     recBattles: true,   // record Arena duels as they are fought or opened
     archive: true,      // keep what the game loads
     live: false,        // no planner-tab hand-over: the collector sends to the store itself
-    state: false,       // Astrolabe web (alpha): send a copy of my own game state to my private row
+    // The private cloud copy of my own game state (only my sign-in reads it). The bookmark version has no
+    // storage shared with the Astrolabe site, so there it is on from the start (owner, 2026-11-12): the site
+    // then works in any tab. With a script manager the hand-over is local, and the copy is an extra (off).
+    state: typeof GM_setValue !== 'function',
     direct: true        // send to the shared store: on from the start (installing it is the yes)
   };
   var S = {
@@ -2179,6 +2182,8 @@
      The site says hello to the tab that opened it every few seconds, so the link comes back by itself after
      either tab is reloaded (the bookmark has to be clicked again in the game tab first). */
   var LINK = { win: null, sig: '', asig: '' };
+  // Is an Astrolabe tab talking to this game tab right now? (it says hello every 10 seconds)
+  function linkLive() { return !!LINK.helloAt && Date.now() - LINK.helloAt < 30000; }
   function linkOrigin() { return window.__ASTRO_SITE_ORIGIN || ('https://' + locCfg().SITE); }
   function linkOpen() {
     try { LINK.win = window.open(window.__ASTRO_SITE_URL || (linkOrigin() + '/Astrolabe/'), 'astrolabe-site'); LINK.sig = ''; LINK.asig = ''; } catch (e) {}
@@ -2202,7 +2207,9 @@
       if (d.astroPage === 'hello') {
         // A hello means that page has (re)started and holds nothing yet: send everything again.
         if (d.need || LINK.win !== e.source) { LINK.sig = ''; LINK.asig = ''; }
-        LINK.win = e.source;
+        var was = linkLive();
+        LINK.win = e.source; LINK.helloAt = Date.now();
+        if (!was) { try { render(); } catch (x) {} }
         try { e.source.postMessage({ astroCol: 'hello', ver: COL_VER, hasKey: !!(live() || {}).key, local: locGet('localOff', '') !== '1', market: mkOn(), mk: mkState(), linked: true }, linkOrigin()); } catch (x) {}
         linkTick();
       } else if (d.astroPage === 'refresh-market') {
@@ -2346,11 +2353,12 @@
       if (locHasGm()) h += '<label><input type="checkbox" id="c_loc"' + (lon ? ' checked' : '') + '>Show my game on the Astrolabe site (this browser only)</label>';
       h += '<label><input type="checkbox" id="c_mk"' + (mkOn() ? ' checked' : '') + '>Help keep market prices fresh</label>';
       if (mkOn()) h += '<div class="mu">Uses your own API key from this PC, only when the shared prices are due: ' + (mks.auto || 0) + ' of 6 calls today' + (mks.last && mks.last.msg && mks.last.msg !== 'off' ? '. Last: ' + colEsc(mks.last.msg) : '') + '</div>';
-      h += '<label><input type="checkbox" id="c_st"' + (S.inputs.state === true ? ' checked' : '') + '>' + (locHasGm() ? 'Also keep a private copy in the cloud (other devices)' : 'Send my game state to Astrolabe (private cloud copy)') + '</label>';
+      h += '<label><input type="checkbox" id="c_st"' + (S.inputs.state === true ? ' checked' : '') + '>' + (locHasGm() ? 'Also keep a private copy in the cloud (other devices)' : 'Send my game to Astrolabe through its server (private: only I can read it)') + '</label>';
       if (S.inputs.state === true) h += '<div class="' + (ST.err ? 'bad' : 'mu') + '">' + (ST.err ? 'Game state: ' + colEsc(ST.err) + '.' : (ST.ok ? 'Game state sent ' + colAgo(ST.ok) + ' (' + Math.round(ST.size / 1024) + ' KB); only you can read it.' : 'Game state: the first copy goes out within a minute.')) + '</div>';
       h += '<div class="mu row">It only listens to what the game shows you. Fights and your PvP build go to the planner\'s shared store. Your own game data stays in this browser. The only thing it ever asks the game is the public market price list, with your own key. Nothing is clicked.</div>';
       h += '<div class="row"><button class="pri" id="c_astro">Open Astrolabe</button> <a href="' + COL_URL + '" target="_blank" rel="noopener" style="color:#7fb0ff;margin-left:8px">PvP planner (old site)</a></div>';
-      if (!locHasGm()) h += '<div class="mu">Bookmark version: open Astrolabe with this button, so this tab can hand it your game data directly (nothing goes to a server).</div>';
+      if (!locHasGm()) h += linkLive() ? '<div class="ok">Astrolabe tab linked: it shows your game live.</div>'
+        : '<div class="warn">No Astrolabe tab is linked to this game tab. Click <b>Open Astrolabe</b> above: only a tab opened with that button can receive your game (one you opened yourself cannot).</div>';
       colBox.innerHTML = h;
       var c = colBox.querySelector('#c_on');
       c.addEventListener('change', function () { S.inputs.direct = c.checked; saveInputs(); if (c.checked) { DIRECT.dirty = true; directPush(); } render(); });
@@ -2391,8 +2399,10 @@
   setTimeout(function () { try { arcNotifTick(); } catch (e) {} }, 15000);
   setInterval(function () { refresh(); render(); }, 10000);
   refresh();
+  if (!locHasGm()) COL.open = true;
   render();
   locStart();
+  setInterval(function () { if (!locHasGm() && COL.open) render(); }, 15000);
 
   function plRow() { return ''; }   // the planner button row of PvP Meta: not in the collector
 })();
