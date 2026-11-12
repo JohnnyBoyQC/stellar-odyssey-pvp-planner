@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Stellar Odyssey – PvP Collector
+// @name         Stellar Odyssey – Astrolabe Collector
 // @namespace    stellarodyssey-pvpcollector
-// @version      1.1.0
-// @description  Keeps your squadron's PvP Build Planner up to date: listens to what the game page loads (battles, Arena, Squadron Groups, map) and sends it to the planner's shared store. No requests to the game, no clicks, no game actions.
+// @version      2.0.0
+// @description  Feeds Astrolabe on the web and your squadron's PvP Build Planner: listens to what the game page loads (battles, Arena, Squadron Groups, map) and sends it to the planner's shared store. No requests to the game, no clicks, no game actions.
 // @match        *://steam.stellarodyssey.app/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -23,9 +23,9 @@
   if (MARK && MARK.getAttribute('data-sopvp-col')) { try { window.dispatchEvent(new CustomEvent('sopvp-col-show')); } catch (e) {} return; }
   if (MARK) MARK.setAttribute('data-sopvp-col', '1');
 
-  var COL_VER = "1.1.0";
+  var COL_VER = "2.0.0";
   /* ============================================================
-     PvP Collector for Stellar Odyssey (1.1.0)
+     Astrolabe Collector for Stellar Odyssey (2.0.0; it was the PvP Collector)
 
      Keeps what the game page itself loads while you play (squadron battle
      logs, Arena duels and the Arena list, Squadron Groups, the member list,
@@ -70,6 +70,7 @@
     recBattles: true,   // record Arena duels as they are fought or opened
     archive: true,      // keep what the game loads
     live: false,        // no planner-tab hand-over: the collector sends to the store itself
+    state: false,       // Astrolabe web (alpha): send a copy of my own game state to my private row
     direct: true        // send to the shared store: on from the start (installing it is the yes)
   };
   var S = {
@@ -1530,6 +1531,32 @@
     return recRoot;
   }
 
+  function shipPicture(root) {
+    try {
+      var icon = String((root.ShipStore.skin && root.ShipStore.skin.icon) || '');
+      var base = icon.replace(/\.\w+$/, '');
+      if (!base) return null;
+      var urls = performance.getEntriesByType('resource').map(function (e) { return e.name; });
+      // Hashed names can hold a dash (reaper-B8e-DOol.webp, reaper-small-B8PABJKz.webp).
+      var big = '/assets/' + base + '-', small = '/assets/' + base + '-small-';
+      var ok = function (u) { return !shipPicBad[u]; };
+      var found = urls.filter(function (u) { return u.indexOf(big) >= 0 && u.indexOf(small) < 0 && /\.(webp|png|jpe?g)(\?|$)/.test(u) && ok(u); })[0] ||
+        urls.filter(function (u) { return u.indexOf(small) >= 0 && ok(u); })[0] || null;
+      if (found) { shipPicKeep(icon, found); return found; }
+      // Not loaded this time: the one remembered for this same ship.
+      var kept = store.get('shippic', null);
+      return (kept && kept.icon === icon && typeof kept.url === 'string' && ok(kept.url)) ? kept.url : null;
+    } catch (e) { return null; }
+  }
+
+  function shipPicKeep(icon, url) {
+    var kept = store.get('shippic', null);
+    if (kept && kept.icon === icon && kept.url === url) return;   // nothing changed, no write
+    store.set('shippic', { icon: icon, url: url });
+  }
+
+  var shipPicBad = {};
+
   /* ============================================================
      BATTLE ARCHIVE (1.1.0; live capture 1.5.0)
 
@@ -1940,6 +1967,98 @@
 
 
   /* ============================================================
+     ASTROLABE STATE FEED (Astrolabe Collector 2.0.0, alpha, off until ticked)
+
+     Astrolabe on the web works on a copy of what this game page already
+     holds (droids, ship, skills, inventory, laboratory...). Every few
+     minutes that copy is sent to the player's own private row in our store,
+     where only their own sign-in can read it. Chat, cosmetics and private
+     fields (API key, e-mail, payment and Discord ids) never leave the tab.
+     It reads the page only: no request to the game, no click.
+     ============================================================ */
+
+  var AST_DROP = /^(Chat|Social|Profile(Badge|Background)|Skins|Tour$|Notification)/;
+  var AST_SECRET = /^(apikey|api_key|apiKey|email|email_verified|user2FA|stripe_customer_id|uid|discordUserId|discordPing|discordNotificationsAllowed|referral_code|referred_by|usernames_history|squadronInvites|acceptedRulesTs)$|(^|_)(token|jwt|password|secret)$/i;
+  // The pictures the Equipment page shows: the game's own icons for the six items and the catalysts
+  // (symbols of the sprite the game page holds) and the address of the ship's picture among the files
+  // the game has loaded. Read from the page; nothing is asked of the game.
+  var AST_ICONS = ['weapon', 'shield', 'engine', 'sensors', 'laser', 'probes'], AST_ICON_MAX = 600 * 1024;
+  function astAssets(sv) {
+    var sprite = {}, size = 0, pic = null;
+    function add(id) {
+      if (sprite[id] || !/^[\w-]{1,60}$/.test(id)) return;
+      var el = document.getElementById(id);
+      if (!el || !/^(symbol|linearGradient|radialGradient|clipPath|mask|filter|pattern)$/i.test(el.tagName)) return;
+      var h = el.outerHTML;
+      if (size + h.length > AST_ICON_MAX) return;
+      sprite[id] = h; size += h.length;
+      (el.innerHTML.match(/url\(#([^)"']+)\)|href="#([^"]+)"/g) || []).forEach(function (m) { var r = /#([^)"']+)/.exec(m); if (r && !el.querySelector('[id="' + r[1] + '"]')) add(r[1]); });
+    }
+    try {
+      AST_ICONS.forEach(add);
+      document.querySelectorAll('symbol[id^="catalyst_"]').forEach(function (el) { add(el.id); });
+    } catch (e) {}
+    try { pic = shipPicture(sv); } catch (e) {}
+    return { sprite: sprite, shipPic: typeof pic === 'string' ? pic : null, shipIcon: (sv.ShipStore && sv.ShipStore.skin && sv.ShipStore.skin.icon) || null };
+  }
+  function astSnapText(sv, assets) {
+    var out = {};
+    Object.keys(sv || {}).forEach(function (id) { if (!AST_DROP.test(id)) out[id] = sv[id]; });
+    if (assets) out.AstroAssets = assets;
+    return JSON.stringify(out, function (k, v) { return k && AST_SECRET.test(k) ? undefined : v; });
+  }
+
+  var ST_URL = 'https://sopvp-planner.stellar-pvp.workers.dev/state', ST_EVERY = 5 * 60000, ST_HOLD = 6 * 3600000;
+  var ST = { busy: false, last: 0, ok: 0, err: null, sig: '', hold: 0, size: 0 };
+  function stOn() { return S.inputs.state === true && (typeof GM_xmlhttpRequest === 'function' || DIRECT_FETCH) && typeof CompressionStream === 'function'; }
+  function stSig(txt) { var h = 5381; for (var i = 0; i < txt.length; i++) h = ((h << 5) + h + txt.charCodeAt(i)) | 0; return txt.length + ':' + h; }
+  function stDeflate(txt) {
+    return new Response(new Blob([txt]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer().then(function (buf) {
+      var u = new Uint8Array(buf), s = '';
+      for (var i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+      return btoa(s);
+    });
+  }
+  function stPost(body) {
+    if (typeof GM_xmlhttpRequest !== 'function') {
+      return fetch(ST_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-SOPVP-Client': 'pvpmeta' }, body: JSON.stringify(body), credentials: 'omit' })
+        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+    }
+    return new Promise(function (ok, no) {
+      try {
+        GM_xmlhttpRequest({ method: 'POST', url: ST_URL, data: JSON.stringify(body), timeout: 60000,
+          headers: { 'Content-Type': 'application/json', 'X-SOPVP-Client': 'pvpmeta' },
+          onload: function (r) { if (r.status < 200 || r.status >= 300) { no(new Error('HTTP ' + r.status)); return; } try { ok(JSON.parse(r.responseText)); } catch (e) { no(e); } },
+          onerror: function () { no(new Error('network')); }, ontimeout: function () { no(new Error('timeout')); } });
+      } catch (e) { no(e); }
+    });
+  }
+  // At most one copy every 5 minutes, and only when something in it changed.
+  function stTick(force) {
+    if (!stOn() || ST.busy) return;
+    var now = Date.now();
+    if (!force && (now < ST.hold || now - ST.last < ST_EVERY)) return;
+    var sv = recState(), u = sv && sv.UserStore;
+    if (!u || !u.username || !u.registered || !u.player) return;   // the game has not loaded yet
+    var txt;
+    try { txt = astSnapText(sv, astAssets(sv)); } catch (e) { ST.err = 'could not read the page'; return; }
+    ST.last = now;
+    var sig = stSig(txt);
+    if (sig === ST.sig) return;
+    ST.busy = true;
+    stDeflate(txt).then(function (z) { ST.size = z.length; return stPost({ who: { username: u.username, registered: u.registered }, t: now, z: z }); })
+      .then(function (r) { ST.busy = false; if (r && r.ok) { ST.sig = sig; ST.ok = Date.now(); ST.err = null; ST.hold = 0; } else ST.err = 'refused'; render(); })
+      .catch(function (e) {
+        ST.busy = false; ST.err = String((e && e.message) || e);
+        // Not let in (never signed in on the site, or Astrolabe is still closed to this account): ask again in 6 hours, not every 5 minutes.
+        if (/HTTP 40[13]/.test(ST.err)) { ST.hold = Date.now() + ST_HOLD; ST.err = 'not open to this account yet (sign in on the Astrolabe site first)'; }
+        render();
+      });
+  }
+  setInterval(function () { try { stTick(false); } catch (e) {} }, 30000);
+  setTimeout(function () { try { stTick(false); } catch (e) {} }, 20000);
+
+  /* ============================================================
      THE BADGE: a small dot in the corner of the game page. Green: up to date
      with the shared store. Orange: an update of the collector is out (with a
      button to get it) or sending failed. A click opens a short status.
@@ -1958,7 +2077,7 @@
     '#box b{font-size:13px}.mu{opacity:.7}.warn{color:#f0b050}.bad{color:#ff7b72}.ok{color:#5fd88a}' +
     'button{font:inherit;font-size:12px;border-radius:6px;padding:4px 10px;cursor:pointer;border:1px solid #4b5a73;background:#26324a;color:#dfe6f0}button.pri{background:#3b82f6;border-color:#3b82f6;color:#fff}' +
     'label{display:flex;gap:6px;align-items:center;margin-top:6px;cursor:pointer}.row{margin-top:6px}' +
-    '</style><div id="box"></div><div id="pill"><span id="dot"></span><span id="lbl">PvP Collector</span></div>';
+    '</style><div id="box"></div><div id="pill"><span id="dot"></span><span id="lbl">Astrolabe Collector</span></div>';
   var colBox = colSh.querySelector('#box'), colDot = colSh.querySelector('#dot'), colLbl = colSh.querySelector('#lbl');
   var panel = colBox;   // what the shared code calls the panel (it redraws "Settings" when open)
   function colMount() { if (document.body && !document.body.contains(colHost)) document.body.appendChild(colHost); }
@@ -1983,10 +2102,10 @@
       var on = S.inputs.direct === true, upd = colUpdate();
       var st = !on ? '' : (DIRECT.err ? 'bad' : (upd ? 'warn' : (DIRECT.ok ? 'ok' : '')));
       colDot.className = st;
-      colLbl.textContent = upd ? 'PvP Collector · update' : 'PvP Collector';
+      colLbl.textContent = upd ? 'Astrolabe Collector · update' : 'Astrolabe Collector';
       colBox.style.display = COL.open ? 'block' : 'none';
       if (!COL.open) return;
-      var h = '<b>PvP Collector</b> <span class="mu">v' + colEsc(COL_VER) + (COL_BOOK ? ' · bookmark' : '') + '</span>';
+      var h = '<b>Astrolabe Collector</b> <span class="mu">v' + colEsc(COL_VER) + (COL_BOOK ? ' · bookmark' : '') + '</span>';
       if (upd) h += '<div class="row warn">A new version is out: ' + colEsc(COL.latest) + '.</div><div class="row"><button class="pri" id="c_upd">Update</button> <span class="mu">opens Tampermonkey, then click Update there</span></div>';
       if (!on) h += '<div class="row warn">Sending is off.</div>';
       else if (DIRECT.err) h += '<div class="row bad">Sending failed (' + colEsc(DIRECT.err) + '); it tries again in a few minutes.</div>';
@@ -1997,11 +2116,15 @@
       if (ARC.err) h += '<div class="bad">' + colEsc(ARC.err) + '</div>';
       if (COL_BOOK) h += '<div class="mu row">Bookmark version: it keeps what the game loads from your click on, until this tab is closed or reloaded.</div>';
       h += '<label><input type="checkbox" id="c_on"' + (on ? ' checked' : '') + '>Send to the PvP Build Planner</label>';
+      h += '<label><input type="checkbox" id="c_st"' + (S.inputs.state === true ? ' checked' : '') + '>Send my game state to Astrolabe (alpha)</label>';
+      if (S.inputs.state === true) h += '<div class="' + (ST.err ? 'bad' : 'mu') + '">' + (ST.err ? 'Game state: ' + colEsc(ST.err) + '.' : (ST.ok ? 'Game state sent ' + colAgo(ST.ok) + ' (' + Math.round(ST.size / 1024) + ' KB); only you can read it.' : 'Game state: the first copy goes out within a minute.')) + '</div>';
       h += '<div class="mu row">It only listens to what the game shows you, reads your own PvP build from the page, and sends them to the planner\'s shared store (open to everyone with the planner link). Nothing is sent to the game and nothing is clicked.</div>';
       h += '<div class="row"><a href="' + COL_URL + '" target="_blank" rel="noopener" style="color:#7fb0ff">Open the planner</a></div>';
       colBox.innerHTML = h;
       var c = colBox.querySelector('#c_on');
       c.addEventListener('change', function () { S.inputs.direct = c.checked; saveInputs(); if (c.checked) { DIRECT.dirty = true; directPush(); } render(); });
+      var cs = colBox.querySelector('#c_st');
+      cs.addEventListener('change', function () { S.inputs.state = cs.checked; saveInputs(); if (cs.checked) { ST.hold = 0; ST.sig = ''; stTick(true); } render(); });
       var u = colBox.querySelector('#c_upd');
       if (u) u.addEventListener('click', function () { window.open(COL_INSTALL + '?v=' + encodeURIComponent(COL.latest), '_blank', 'noopener'); });
     } catch (e) {}
