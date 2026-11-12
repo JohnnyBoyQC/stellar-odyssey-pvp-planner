@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stellar Odyssey – Astrolabe Collector
 // @namespace    stellarodyssey-pvpcollector
-// @version      2.0.0
+// @version      2.1.0
 // @description  Feeds Astrolabe on the web and your squadron's PvP Build Planner: listens to what the game page loads (battles, Arena, Squadron Groups, map) and sends it to the planner's shared store. No requests to the game, no clicks, no game actions.
 // @match        *://steam.stellarodyssey.app/*
 // @grant        GM_getValue
@@ -23,9 +23,9 @@
   if (MARK && MARK.getAttribute('data-sopvp-col')) { try { window.dispatchEvent(new CustomEvent('sopvp-col-show')); } catch (e) {} return; }
   if (MARK) MARK.setAttribute('data-sopvp-col', '1');
 
-  var COL_VER = "2.0.0";
+  var COL_VER = "2.1.0";
   /* ============================================================
-     Astrolabe Collector for Stellar Odyssey (2.0.0; it was the PvP Collector)
+     Astrolabe Collector for Stellar Odyssey (2.1.0; it was the PvP Collector)
 
      Keeps what the game page itself loads while you play (squadron battle
      logs, Arena duels and the Arena list, Squadron Groups, the member list,
@@ -2059,7 +2059,8 @@
   setTimeout(function () { try { stTick(false); } catch (e) {} }, 20000);
 
   /* ============================================================
-     THE BADGE: a small dot in the corner of the game page. Green: up to date
+     THE BADGE: a small button in the game's top bar (2.1.0; the bottom left
+     corner while there is no top bar). Green: up to date
      with the shared store. Orange: an update of the collector is out (with a
      button to get it) or sending failed. A click opens a short status.
      ============================================================ */
@@ -2067,7 +2068,9 @@
   var view = 'set', tab = 'col';
   var COL = { latest: null, checked: 0, open: store.get('open', false) };
   var colHost = document.createElement('div');
-  colHost.style.cssText = 'position:fixed;left:10px;bottom:10px;z-index:2147483646';
+  var COL_FLOAT = 'position:fixed;left:10px;bottom:10px;z-index:2147483646', COL_DOCK = 'position:relative;display:flex;align-items:center;margin-right:10px';
+  colHost.className = 'astrolabe-collector';
+  colHost.style.cssText = COL_FLOAT;
   var colSh = colHost.attachShadow({ mode: 'open' });
   colSh.innerHTML = '<style>' +
     ':host{all:initial}*{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}' +
@@ -2077,12 +2080,31 @@
     '#box b{font-size:13px}.mu{opacity:.7}.warn{color:#f0b050}.bad{color:#ff7b72}.ok{color:#5fd88a}' +
     'button{font:inherit;font-size:12px;border-radius:6px;padding:4px 10px;cursor:pointer;border:1px solid #4b5a73;background:#26324a;color:#dfe6f0}button.pri{background:#3b82f6;border-color:#3b82f6;color:#fff}' +
     'label{display:flex;gap:6px;align-items:center;margin-top:6px;cursor:pointer}.row{margin-top:6px}' +
+    // docked in the game's top bar: a plain button there, its status dropping down under it
+    ':host(.dk) #pill{box-shadow:none;padding:5px 12px}:host(.dk) #box{position:absolute;top:calc(100% + 8px);right:0;margin:0;z-index:2147483646;text-align:left}' +
     '</style><div id="box"></div><div id="pill"><span id="dot"></span><span id="lbl">Astrolabe Collector</span></div>';
   var colBox = colSh.querySelector('#box'), colDot = colSh.querySelector('#dot'), colLbl = colSh.querySelector('#lbl');
   var panel = colBox;   // what the shared code calls the panel (it redraws "Settings" when open)
-  function colMount() { if (document.body && !document.body.contains(colHost)) document.body.appendChild(colHost); }
+  /* The badge sits in the game's own top bar, just left of the crown (the right-hand list of
+     the header toolbar), as Astrolabe's button does. The game can rebuild its top bar, so this
+     is checked every second and the badge put back; with no top bar to be found (the game still
+     loading, the login screen) it floats in the bottom left corner as before. */
+  var colDocked = false;
+  function colTopBar() {
+    try { var l = document.querySelectorAll('header.q-header .q-toolbar > .q-list.justify-end'); return l.length ? l[l.length - 1] : null; } catch (e) { return null; }
+  }
+  function colMount() {
+    var list = colTopBar();
+    if (list) {
+      if (colHost.parentNode !== list) list.insertBefore(colHost, list.firstChild);
+      if (!colDocked) { colDocked = true; colHost.style.cssText = COL_DOCK; colHost.className = 'astrolabe-collector dk'; }
+    } else if (document.body && (colDocked || colHost.parentNode !== document.body)) {
+      document.body.appendChild(colHost);
+      colDocked = false; colHost.style.cssText = COL_FLOAT; colHost.className = 'astrolabe-collector';
+    }
+  }
   colMount();
-  setInterval(colMount, 2000);
+  setInterval(function () { try { colMount(); } catch (e) {} }, 1000);
   colSh.querySelector('#pill').addEventListener('click', function () { COL.open = !COL.open; store.set('open', COL.open); render(); });
   // The bookmarklet clicked while a collector already runs here: show this one.
   try { window.addEventListener('sopvp-col-show', function () { COL.open = true; render(); }); } catch (e) {}
