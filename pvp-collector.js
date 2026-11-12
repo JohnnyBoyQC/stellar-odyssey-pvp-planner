@@ -1,13 +1,14 @@
-/* Stellar Odyssey – Astrolabe Collector 2.1.0 (bookmark version). Loaded by the bookmarklet on the game page. */
+/* Stellar Odyssey – Astrolabe Collector 2.2.0 (bookmark version). Loaded by the bookmarklet on the game page. */
 (function () {
   'use strict';
+  if (location.hostname === 'johnnyboyqc.github.io' || window.__ASTRO_SITE_TEST) { siteMode("2.2.0"); return; }
   var MARK = document.documentElement;
   if (MARK && MARK.getAttribute('data-sopvp-col')) { try { window.dispatchEvent(new CustomEvent('sopvp-col-show')); } catch (e) {} return; }
   if (MARK) MARK.setAttribute('data-sopvp-col', '1');
 
-  var COL_VER = "2.1.0";
+  var COL_VER = "2.2.0";
   /* ============================================================
-     Astrolabe Collector for Stellar Odyssey (2.1.0; it was the PvP Collector)
+     Astrolabe Collector for Stellar Odyssey (2.2.0; it was the PvP Collector)
 
      Keeps what the game page itself loads while you play (squadron battle
      logs, Arena duels and the Arena list, Squadron Groups, the member list,
@@ -2041,6 +2042,227 @@
   setTimeout(function () { try { stTick(false); } catch (e) {} }, 20000);
 
   /* ============================================================
+     LOCAL HAND-OVER AND MARKET DUTY (Astrolabe Collector 2.2.0)
+
+     1. Personal data stays on this PC. In the game tab the Collector keeps
+        a copy of the game state (and the player's own API key, which the
+        game page holds) in the script manager's own storage. The same
+        script also runs on the Astrolabe site, where it hands that copy to
+        the page, in this browser, live. Nothing personal goes to a server
+        (the private cloud copy is a separate option, off).
+     2. Market prices are the same for everyone, so they are shared: when
+        the shared snapshot is due, ONE Collector fetches /market from the
+        game's public API with its own player's key and uploads the answer.
+        The server gives that job to one Collector at a time. At most 6
+        such calls a day per player by itself, more only on the player's
+        own click on the site.
+
+     Everything here is function declarations with their constants inside,
+     because on the Astrolabe site only this part runs (siteMode), before
+     anything else of the script is set up.
+     ============================================================ */
+
+  function locCfg() { return { API: 'https://sopvp-planner.stellar-pvp.workers.dev', GAME: 'https://steamapi.stellarodyssey.app', SITE: 'johnnyboyqc.github.io', AUTO: 6, MANUAL: 20, DAY: 86400000 }; }
+  function locHasGm() { return typeof GM_setValue === 'function' && typeof GM_getValue === 'function'; }
+  // Plain text values in the script manager's storage (the bookmark version has none: page storage of the game tab).
+  function locGet(k, d) {
+    try { if (locHasGm()) { var v = GM_getValue('astro:' + k); return v === undefined || v === null ? d : v; } } catch (e) {}
+    try { var x = localStorage.getItem('socol:astro:' + k); return x === null ? d : x; } catch (e) { return d; }
+  }
+  function locSet(k, v) {
+    try { if (locHasGm()) { GM_setValue('astro:' + k, v); return; } } catch (e) {}
+    try { localStorage.setItem('socol:astro:' + k, v); } catch (e) {}
+  }
+  function locJson(k, d) { try { var v = JSON.parse(locGet(k, 'null')); return v === null ? d : v; } catch (e) { return d; } }
+
+  /* ---- one request, script manager or page ---- */
+  function locReq(method, url, headers, body) {
+    return new Promise(function (ok, no) {
+      if (typeof GM_xmlhttpRequest === 'function') {
+        try {
+          GM_xmlhttpRequest({ method: method, url: url, headers: headers || {}, data: body, timeout: 30000,
+            onload: function (r) {
+              var H = {};
+              String(r.responseHeaders || '').split(/\r?\n/).forEach(function (l) { var p = l.indexOf(':'); if (p > 0) H[l.slice(0, p).trim().toLowerCase()] = l.slice(p + 1).trim(); });
+              ok({ status: r.status, text: r.responseText || '', headers: H });
+            },
+            onerror: function () { no(new Error('network')); }, ontimeout: function () { no(new Error('timeout')); } });
+        } catch (e) { no(e); }
+        return;
+      }
+      fetch(url, { method: method, headers: headers || {}, body: body, credentials: 'omit', cache: 'no-store' }).then(function (r) {
+        var H = {}; try { r.headers.forEach(function (v, k) { H[k.toLowerCase()] = v; }); } catch (e) {}
+        return r.text().then(function (t) { ok({ status: r.status, text: t, headers: H }); });
+      }).catch(no);
+    });
+  }
+
+  /* ---- a signed word to our server (see "seen" in locStart) ---- */
+  function colSign(text) {
+    var k = ['astrolabe', 'collector', 'hello', '7f3a9c21e5b84d06'].join(':'), enc = new TextEncoder();
+    return crypto.subtle.importKey('raw', enc.encode(k), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']).then(function (key) {
+      return crypto.subtle.sign('HMAC', key, enc.encode(text));
+    }).then(function (buf) {
+      var u = new Uint8Array(buf), s = '';
+      for (var i = 0; i < u.length; i++) s += (u[i] < 16 ? '0' : '') + u[i].toString(16);
+      return s;
+    });
+  }
+
+  /* ---- market duty ---- */
+  var MK_BUSY = false;
+  function mkState() { var s = locJson('mk', {}), day = Math.floor(Date.now() / locCfg().DAY); if (s.day !== day) s = { day: day, auto: 0, manual: 0, hold: s.hold || 0, last: s.last || null }; return s; }
+  function mkSave(s) { locSet('mk', JSON.stringify(s)); }
+  function mkOn() { return locGet('mkOff', '') !== '1'; }
+  // manual: the player's own click on the site. Resolves {ok, msg}; never rejects.
+  function mkRun(manual, liveKey, liveWho) {
+    var C = locCfg(), now = Date.now();
+    if (MK_BUSY) return Promise.resolve({ ok: false, msg: 'already asking' });
+    if (!manual && !mkOn()) return Promise.resolve({ ok: false, msg: 'off' });
+    var key = liveKey || locGet('key', ''), who = liveWho || locJson('who', null), s = mkState();
+    if (!key || !who || !who.username || !who.registered) return Promise.resolve({ ok: false, msg: 'Open the game once with the Collector, so it knows your API key.' });
+    if (s.hold > now) return Promise.resolve({ ok: false, msg: s.holdWhy || 'paused' });
+    if (!manual && s.auto >= C.AUTO) return Promise.resolve({ ok: false, msg: 'done for today' });
+    if (manual && s.manual >= C.MANUAL) return Promise.resolve({ ok: false, msg: 'You refreshed the prices ' + C.MANUAL + ' times today: that is the limit.' });
+    MK_BUSY = true;
+    var HJ = { 'Content-Type': 'application/json', 'X-SOPVP-Client': 'pvpmeta' };
+    function done(o) { MK_BUSY = false; s.last = { t: Date.now(), msg: o.msg, ok: o.ok }; mkSave(s); return o; }
+    // 1. Is a snapshot due, and is this Collector the one to fetch it?
+    return locReq('POST', C.API + '/market/claim', HJ, JSON.stringify({ who: who, manual: !!manual })).then(function (r) {
+      var c = {}; try { c = JSON.parse(r.text); } catch (e) {}
+      if (r.status !== 200 || !c.go) return done({ ok: r.status === 200, msg: r.status === 200 ? (c.why || 'Prices are current.') : (c.error === 'alpha' || c.error === 'not_member' ? 'not open to this account yet' : 'server ' + r.status) });
+      // 2. One call to the game's public API, with this player's own key.
+      if (manual) s.manual++; else s.auto++;
+      mkSave(s);
+      var h = { 'Accept': 'application/json', 'sodyssey-api-key': key };
+      if (c.etag) h['If-None-Match'] = c.etag;
+      return locReq('GET', C.GAME + '/api/public/market', h, undefined).then(function (g) {
+        var age = /max-age=(\d+)/.exec(g.headers['cache-control'] || ''), rem = Number(g.headers['x-daily-remaining']);
+        var put = { who: who, maxAge: age ? Number(age[1]) : null, rem: isFinite(rem) && g.headers['x-daily-remaining'] !== undefined ? rem : null };
+        if (g.status === 401 || g.status === 403) { s.hold = Date.now() + 12 * 3600000; s.holdWhy = 'The game refused your API key; the Collector tries again in 12 hours.'; put.failed = g.status; }
+        else if (g.status === 429) { s.hold = (Math.floor(Date.now() / C.DAY) + 1) * C.DAY; s.holdWhy = 'Your API key reached its limit for today.'; put.failed = 429; }
+        else if (g.status === 304) put.unchanged = true;
+        else if (g.status === 200) { try { put.data = JSON.parse(g.text); put.etag = g.headers.etag || ''; } catch (e) { put.failed = 200; } }
+        else put.failed = g.status;
+        // 3. The answer (or the failure, so the next Collector can try) goes to the shared store.
+        return locReq('POST', C.API + '/market/put', HJ, JSON.stringify(put)).then(function (u) {
+          if (put.failed) return done({ ok: false, msg: s.holdWhy && s.hold > Date.now() ? s.holdWhy : 'The game answered ' + put.failed + '.' });
+          return done({ ok: u.status === 200, msg: u.status === 200 ? (put.unchanged ? 'Prices checked: no new snapshot yet.' : 'Prices updated for everyone.') : 'The server refused the prices (' + u.status + ').' });
+        });
+      });
+    }).catch(function (e) { return done({ ok: false, msg: String((e && e.message) || e) }); });
+  }
+
+  /* ---- in the game tab: keep the local copy fresh ---- */
+  var LOC = { sig: '', asig: '', aAt: 0 };
+  function locOn() { return locHasGm() && locGet('localOff', '') !== '1'; }
+  function locTick() {
+    var sv = recState(), u = sv && sv.UserStore;
+    if (!u || !u.username || !u.registered || !u.player) return;
+    // The key and the name are kept for the market duty (also used on the site's Refresh).
+    if (typeof u.apikey === 'string' && u.apikey.length >= 16 && !/\s/.test(u.apikey) && locGet('key', '') !== u.apikey) locSet('key', u.apikey);
+    var who = JSON.stringify({ username: u.username, registered: u.registered });
+    if (locGet('who', '') !== who) locSet('who', who);
+    if (!locOn()) return;
+    var txt;
+    try { txt = astSnapText(sv, null); } catch (e) { return; }
+    var sig = stSig(txt);
+    if (sig !== LOC.sig) { LOC.sig = sig; locSet('state', txt); locSet('stateT', String(Date.now())); }
+    if (Date.now() - LOC.aAt > 120000) {
+      LOC.aAt = Date.now();
+      try { var a = JSON.stringify(astAssets(sv)), as = stSig(a); if (as !== LOC.asig && a.length > 40) { LOC.asig = as; locSet('assets', a); } } catch (e) {}
+    }
+  }
+  /* ---- tab to tab (the bookmark version has no shared storage; also works for the userscript) ----
+     "Open Astrolabe" in the badge opens the site from this game tab, which links the two tabs: the copy of
+     the game state then goes straight from this tab to that one (postMessage), in this browser, no server.
+     The site says hello to the tab that opened it every few seconds, so the link comes back by itself after
+     either tab is reloaded (the bookmark has to be clicked again in the game tab first). */
+  var LINK = { win: null, sig: '', asig: '' };
+  function linkOrigin() { return window.__ASTRO_SITE_ORIGIN || ('https://' + locCfg().SITE); }
+  function linkOpen() {
+    try { LINK.win = window.open(window.__ASTRO_SITE_URL || (linkOrigin() + '/Astrolabe/'), 'astrolabe-site'); LINK.sig = ''; LINK.asig = ''; } catch (e) {}
+  }
+  function linkTick() {
+    if (!LINK.win || locGet('localOff', '') === '1') return;
+    try { if (LINK.win.closed) { LINK.win = null; return; } } catch (e) { return; }
+    var sv = recState(), u = sv && sv.UserStore;
+    if (!u || !u.username || !u.player) return;
+    var txt; try { txt = astSnapText(sv, null); } catch (e) { return; }
+    var sig = stSig(txt);
+    if (sig === LINK.sig) return;
+    var msg = { astroCol: 'state', t: Date.now(), txt: txt, assets: '' };
+    try { var a = JSON.stringify(astAssets(sv)), as = stSig(a); if (as !== LINK.asig) { LINK.asig = as; msg.assets = a; } } catch (e) {}
+    try { LINK.win.postMessage(msg, linkOrigin()); LINK.sig = sig; } catch (e) {}
+  }
+  function linkListen(live) {
+    window.addEventListener('message', function (e) {
+      var d = e.data;
+      if (e.origin !== linkOrigin() || !d || typeof d.astroPage !== 'string' || !e.source) return;
+      if (d.astroPage === 'hello') {
+        // A hello means that page has (re)started and holds nothing yet: send everything again.
+        if (d.need || LINK.win !== e.source) { LINK.sig = ''; LINK.asig = ''; }
+        LINK.win = e.source;
+        try { e.source.postMessage({ astroCol: 'hello', ver: COL_VER, hasKey: !!(live() || {}).key, local: locGet('localOff', '') !== '1', market: mkOn(), mk: mkState(), linked: true }, linkOrigin()); } catch (x) {}
+        linkTick();
+      } else if (d.astroPage === 'refresh-market') {
+        var l = live() || {};
+        mkRun(true, l.key, l.who).then(function (r) { try { e.source.postMessage({ astroCol: 'market', id: d.id, ok: r.ok, msg: r.msg }, linkOrigin()); } catch (x) {} });
+      }
+    });
+  }
+  function locStart() {
+    setInterval(function () { try { locTick(); } catch (e) {} try { linkTick(); } catch (e) {} }, 15000);
+    setTimeout(function () { try { locTick(); } catch (e) {} }, 8000);
+    linkListen(function () { return live(); });
+    var live = function () { var sv = recState(), u = sv && sv.UserStore; return u && u.username && u.registered ? { key: typeof u.apikey === 'string' && u.apikey.length >= 16 ? u.apikey : '', who: { username: u.username, registered: u.registered } } : null; };
+    var duty = function () { var l = live(); if (l && l.key) mkRun(false, l.key, l.who).then(function () { try { render(); } catch (e) {} }); };
+    setTimeout(duty, 40000 + Math.floor(Math.random() * 20000));
+    setInterval(duty, 5 * 60000);
+    // "This player runs the Collector": Astrolabe opens only for players who do (owner's rule: nobody
+    // takes the shared prices and fights without helping to bring them in). A word to our own server
+    // at the start and every 6 hours; it carries the name and the version, nothing else.
+    // The word is signed (HMAC-SHA256 over the account, the version and the time), and the server only
+    // takes a fresh one: a copied or hand-typed request is refused. The signing key sits in this public
+    // script, so this keeps out replays and guesses, not someone who reads and re-runs the code.
+    var seen = function () {
+      var l = live(); if (!l) return;
+      var ts = Date.now();
+      colSign('seen|' + l.who.registered + '|' + COL_VER + '|' + ts).then(function (sig) {
+        return locReq('POST', locCfg().API + '/collector/seen', { 'Content-Type': 'application/json', 'X-SOPVP-Client': 'pvpmeta' }, JSON.stringify({ who: l.who, ver: COL_VER, ts: ts, sig: sig }));
+      }).catch(function () {});
+    };
+    setTimeout(seen, 20000);
+    setInterval(seen, 6 * 3600000);
+  }
+
+  /* ---- on the Astrolabe site: hand the local copy to the page ---- */
+  function siteMode(ver) {
+    var origin = location.origin;
+    function post(o) { try { window.postMessage(o, origin); } catch (e) {} }
+    function hello() { post({ astroCol: 'hello', ver: ver, hasKey: !!locGet('key', ''), local: locGet('localOff', '') !== '1', market: mkOn(), mk: mkState() }); }
+    function sendState() {
+      var txt = locGet('state', ''), t = Number(locGet('stateT', '0'));
+      if (txt && t && locGet('localOff', '') !== '1') post({ astroCol: 'state', t: t, txt: txt, assets: locGet('assets', '') });
+    }
+    window.addEventListener('message', function (e) {
+      var d = e.data;
+      if (e.origin !== origin || !d || typeof d.astroPage !== 'string') return;
+      if (d.astroPage === 'hello') { hello(); sendState(); }
+      else if (d.astroPage === 'refresh-market') mkRun(true).then(function (r) { post({ astroCol: 'market', id: d.id, ok: r.ok, msg: r.msg }); });
+    });
+    try { if (typeof GM_addValueChangeListener === 'function') GM_addValueChangeListener('astro:stateT', function () { sendState(); }); } catch (e) {}
+    setInterval(sendStateIfNew, 5000);
+    var lastT = '';
+    function sendStateIfNew() { var t = locGet('stateT', '0'); if (t !== lastT) { lastT = t; sendState(); } }
+    // Market duty also from here, while the site is open and the game is not.
+    setTimeout(function () { mkRun(false); }, 30000 + Math.floor(Math.random() * 20000));
+    setInterval(function () { mkRun(false); }, 5 * 60000);
+    hello();
+    document.addEventListener('DOMContentLoaded', function () { hello(); sendState(); });
+  }
+
+  /* ============================================================
      THE BADGE: a small button in the game's top bar (2.1.0; the bottom left
      corner while there is no top bar). Green: up to date
      with the shared store. Orange: an update of the collector is out (with a
@@ -2120,15 +2342,24 @@
       if (ARC.err) h += '<div class="bad">' + colEsc(ARC.err) + '</div>';
       if (COL_BOOK) h += '<div class="mu row">Bookmark version: it keeps what the game loads from your click on, until this tab is closed or reloaded.</div>';
       h += '<label><input type="checkbox" id="c_on"' + (on ? ' checked' : '') + '>Send to the PvP Build Planner</label>';
-      h += '<label><input type="checkbox" id="c_st"' + (S.inputs.state === true ? ' checked' : '') + '>Send my game state to Astrolabe (alpha)</label>';
+      var mks = mkState(), lon = locGet('localOff', '') !== '1';
+      if (locHasGm()) h += '<label><input type="checkbox" id="c_loc"' + (lon ? ' checked' : '') + '>Show my game on the Astrolabe site (this browser only)</label>';
+      h += '<label><input type="checkbox" id="c_mk"' + (mkOn() ? ' checked' : '') + '>Help keep market prices fresh</label>';
+      if (mkOn()) h += '<div class="mu">Uses your own API key from this PC, only when the shared prices are due: ' + (mks.auto || 0) + ' of 6 calls today' + (mks.last && mks.last.msg && mks.last.msg !== 'off' ? '. Last: ' + colEsc(mks.last.msg) : '') + '</div>';
+      h += '<label><input type="checkbox" id="c_st"' + (S.inputs.state === true ? ' checked' : '') + '>' + (locHasGm() ? 'Also keep a private copy in the cloud (other devices)' : 'Send my game state to Astrolabe (private cloud copy)') + '</label>';
       if (S.inputs.state === true) h += '<div class="' + (ST.err ? 'bad' : 'mu') + '">' + (ST.err ? 'Game state: ' + colEsc(ST.err) + '.' : (ST.ok ? 'Game state sent ' + colAgo(ST.ok) + ' (' + Math.round(ST.size / 1024) + ' KB); only you can read it.' : 'Game state: the first copy goes out within a minute.')) + '</div>';
-      h += '<div class="mu row">It only listens to what the game shows you, reads your own PvP build from the page, and sends them to the planner\'s shared store (open to everyone with the planner link). Nothing is sent to the game and nothing is clicked.</div>';
-      h += '<div class="row"><a href="' + COL_URL + '" target="_blank" rel="noopener" style="color:#7fb0ff">Open the planner</a></div>';
+      h += '<div class="mu row">It only listens to what the game shows you. Fights and your PvP build go to the planner\'s shared store. Your own game data stays in this browser. The only thing it ever asks the game is the public market price list, with your own key. Nothing is clicked.</div>';
+      h += '<div class="row"><button class="pri" id="c_astro">Open Astrolabe</button> <a href="' + COL_URL + '" target="_blank" rel="noopener" style="color:#7fb0ff;margin-left:8px">PvP planner (old site)</a></div>';
+      if (!locHasGm()) h += '<div class="mu">Bookmark version: open Astrolabe with this button, so this tab can hand it your game data directly (nothing goes to a server).</div>';
       colBox.innerHTML = h;
       var c = colBox.querySelector('#c_on');
       c.addEventListener('change', function () { S.inputs.direct = c.checked; saveInputs(); if (c.checked) { DIRECT.dirty = true; directPush(); } render(); });
+      var cl = colBox.querySelector('#c_loc'), cm = colBox.querySelector('#c_mk');
+      if (cl) cl.addEventListener('change', function () { locSet('localOff', cl.checked ? '' : '1'); if (!cl.checked) { locSet('state', ''); locSet('stateT', '0'); LOC.sig = ''; } else locTick(); render(); });
+      cm.addEventListener('change', function () { locSet('mkOff', cm.checked ? '' : '1'); render(); });
       var cs = colBox.querySelector('#c_st');
       cs.addEventListener('change', function () { S.inputs.state = cs.checked; saveInputs(); if (cs.checked) { ST.hold = 0; ST.sig = ''; stTick(true); } render(); });
+      colBox.querySelector('#c_astro').addEventListener('click', function () { linkOpen(); });
       var u = colBox.querySelector('#c_upd');
       if (u) u.addEventListener('click', function () { window.open(COL_INSTALL + '?v=' + encodeURIComponent(COL.latest), '_blank', 'noopener'); });
     } catch (e) {}
@@ -2161,6 +2392,7 @@
   setInterval(function () { refresh(); render(); }, 10000);
   refresh();
   render();
+  locStart();
 
   function plRow() { return ''; }   // the planner button row of PvP Meta: not in the collector
 })();
