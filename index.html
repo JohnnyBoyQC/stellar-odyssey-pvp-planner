@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PvP Build Planner (beta)</title>
-<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.18.0">
+<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.20.1">
 </head>
 <body>
 <script>
 (function () {
   'use strict';
-  var PAGE_VER = "1.18.0";
+  var PAGE_VER = "1.20.1";
   var GRAB_SRC = "(function () {\nif (window.__sopvpGrab) { window.__sopvpGrab.show(); return; }\nvar PL = 'https://johnnyboyqc.github.io/stellar-odyssey-pvp-planner/', OR = 'https://johnnyboyqc.github.io';\nvar G = { squad: {}, roster: null, duels: {}, list: {}, box: null };\nvar RE = /\\/api\\/(squadrons\\/(battlelog|groups)|battlefield\\/arenaduels)(\\?|$)/;\nfunction abs(u) { try { return new URL(String((u && u.href) || u), location.href).href; } catch (e) { return String(u); } }\nfunction take(url, text) {\nvar b;\ntry { b = JSON.parse(text); } catch (e) { return; }\nif (/battlelog/.test(url)) (b && b.battles || []).forEach(function (x) { if (x && x._id && Array.isArray(x.logs)) G.squad[x._id] = x; });\nelse if (/arenaduels/.test(url)) (b && b.results || []).forEach(function (x) { if (x && x._id && x.attackerName && x.defenderName) G.list[x._id] = x; });\nelse G.roster = { t: Date.now(), body: text };\ndraw();\n}\nvar XP = XMLHttpRequest.prototype, oO = XP.open, oS = XP.send;\nXP.open = function (m, u) { try { this.__sopvpG = abs(u); } catch (e) {} return oO.apply(this, arguments); };\nXP.send = function () {\nvar x = this;\ntry {\nif (RE.test(x.__sopvpG || '')) x.addEventListener('load', function () {\ntry {\nif (x.status < 200 || x.status >= 300) return;\nvar t = (x.responseType === '' || x.responseType === 'text') ? x.responseText : (x.responseType === 'json' ? JSON.stringify(x.response) : null);\nif (t) take(x.responseURL || x.__sopvpG, t);\n} catch (e) {}\n});\n} catch (e) {}\nreturn oS.apply(this, arguments);\n};\nvar oF = window.fetch;\nif (typeof oF === 'function') window.fetch = function (i) {\nvar p = oF.apply(this, arguments);\ntry {\nvar u = abs(typeof i === 'string' ? i : (i && i.url));\nif (RE.test(u)) p.then(function (r) { if (r.ok) r.clone().text().then(function (t) { take(r.url || u, t); }, function () {}); }, function () {});\n} catch (e) {}\nreturn p;\n};\nfunction state() {\ntry {\nvar el = document.querySelector('#q-app') || document.querySelector('#app'), a = el && el.__vue_app__;\nvar p = a && a.config && a.config.globalProperties && a.config.globalProperties.$pinia;\nreturn p && p.state && p.state.value;\n} catch (e) { return null; }\n}\nfunction copy(o) { try { return JSON.parse(JSON.stringify(o)); } catch (e) { return null; } }\nfunction tick() {\nvar st = state();\nif (!st) return;\ntry {\nvar A = st.PvPArenaStore, d = A && A.currentDuel;\nif (d && d._id && d.logs && d.logs.length && !G.duels[d._id]) { G.duels[d._id] = copy(d); draw(); }\nvar s = st.squadronStore;\nif (!G.roster && s && s.group1 && s.group1.length) { G.roster = { t: Date.now(), body: JSON.stringify({ squad: [{ group1: copy(s.group1), group2: copy(s.group2 || []), group3: copy(s.group3 || []), available: [] }] }) }; draw(); }\n} catch (e) {}\n}\nsetInterval(tick, 1000);\n// The squadron's member list: the game page always holds it (names only).\nfunction sqNames(st) {\ntry {\nvar q = st.UserStore.squadron;\nif (!q || !Array.isArray(q.members) || !q.members.length) return [];\nreturn [{ t: Date.now(), sq: String(q.name || ''), names: q.members.map(function (m) { return m && m.username ? String(m.username) : null; }).filter(Boolean).slice(0, 300) }];\n} catch (e) { return []; }\n}\n// Squadron Groups as the page shows it right now (every member's PvP\n// points, gear and clones), once that tab has been opened. Members who are\n// in no group come from the game's last answer (lastBody), which lists them.\nfunction sqLive(st, lastBody) {\ntry {\nvar s = st.squadronStore;\nif (!s || !Array.isArray(s.group1)) return null;\nvar gs = [s.group1, s.group2 || [], s.group3 || []], n = 0, inG = {};\ngs.forEach(function (g) { g.forEach(function (m) { if (m && m.username && m.pvpstats) { n++; inG[m.username] = 1; } }); });\nif (!n) return null;\nvar av = Array.isArray(s.available) ? s.available : null;\nif (!av && lastBody) { try { var b = JSON.parse(lastBody), q = Array.isArray(b.squad) ? b.squad[0] : b; av = (q.available || []).filter(function (m) { return m && m.username && !inG[m.username]; }); } catch (e) { av = null; } }\nreturn { t: Date.now(), body: JSON.stringify({ squad: [{ group1: gs[0], group2: gs[1], group3: gs[2], available: av || [] }] }) };\n} catch (e) { return null; }\n}\nfunction build(st) {\ntry {\nvar U = st.UserStore, P = U.player, mats = {};\n(P.pvp_gear || []).forEach(function (g) { mats[String(g.statCost || '').toLowerCase()] = 1; });\nvar slots = (st.PetsStore && st.PetsStore.petSlots) || [], inSlot = {};\nslots.forEach(function (x) { if (x && x.pet) inSlot[x.pet] = 1; });\nreturn {\nUserStore: { username: U.username, pvp_badges: U.pvp_badges, player: copy({ pvp_gear: P.pvp_gear, pvpstats: P.pvpstats, clones: P.clones }) },\nCraftStore: { crafting_level: st.CraftStore && st.CraftStore.crafting_level },\nMaterialsStore: { materialsList: ((st.MaterialsStore && st.MaterialsStore.materialsList) || []).filter(function (m) { var n = m && m.item && (m.item.name || m.item); return n && mats[String(n).toLowerCase()]; }).map(function (m) { return { item: { name: m.item.name || m.item }, quantity: m.quantity }; }) },\nPetsStore: { petSlots: slots.filter(function (x) { return x && x.pet; }).map(function (x) { return { pet: x.pet }; }), pets: ((st.PetsStore && st.PetsStore.pets) || []).filter(function (p) { return p && inSlot[p._id] && p.name === 'Velari'; }).map(function (p) { return { _id: p._id, name: p.name, level: p.level }; }) }\n};\n} catch (e) { return null; }\n}\nfunction payload() {\nvar st = state();\nreturn { app: 'PvP Planner button', v: 1, made: Date.now(), me: st && st.UserStore ? st.UserStore.username : null, build: st ? build(st) : null,\nsquad: Object.keys(G.squad).map(function (k) { return { battle: G.squad[k] }; }),\nduel: Object.keys(G.duels).map(function (k) { return { duel: G.duels[k], saved: Date.now() }; }),\nduelList: Object.keys(G.list).map(function (k) { return { row: G.list[k] }; }),\nroster: (G.roster ? [G.roster] : []).concat(st && sqLive(st, G.roster && G.roster.body) ? [sqLive(st, G.roster && G.roster.body)] : []),\nmembers: st ? sqNames(st) : [] };\n}\nfunction send() {\nvar nonce = String(Math.random()).slice(2), w = window.open(PL + '#wait=' + nonce, '_blank');\nif (!w) { alert(L.p); return; }\nwindow.addEventListener('message', function on(e) {\nif (e.origin !== OR || !e.data || e.data.sopvpReady !== nonce || e.source !== w) return;\nwindow.removeEventListener('message', on);\ne.source.postMessage({ sopvpRaw: payload(), nonce: nonce }, OR);\n});\n}\nvar L = (function () {\nvar n = String((navigator.languages && navigator.languages[0]) || navigator.language || 'en').toLowerCase();\nvar T = {\nes: { m: 'miembros del escuadrón', b: 'batallas de escuadrón', d: 'duelos de arena abiertos', l: 'en la lista de arena', r: 'plantilla', y: 'sí', n: 'todavía no', h: 'Ahora recorre Registro de peleas › Escuadrón (50 por página, todas las páginas), abre Registro de peleas › Arena y abre Grupos de escuadrón. Ver pelea solo hace falta para rivales nunca vistos en una batalla de escuadrón. Deja esta pestaña abierta.', s: 'Enviar al planificador ↗', p: 'El navegador bloqueó la pestaña nueva: permite las ventanas emergentes de este sitio y vuelve a pulsar Enviar.' },\nzh: { m: '名舰队成员', b: '场舰队战斗', d: '场已打开的竞技场决斗', l: '条竞技场列表记录', r: '名单', y: '已有', n: '还没有', h: '现在浏览 战斗日志 › 舰队（每页 50 条，每一页都看），打开 战斗日志 › 竞技场，再打开舰队编组。只有从未在舰队战斗中见过的对手才需要点击查看战斗。请保持此标签页打开。', s: '发送到规划器 ↗', p: '浏览器拦截了新标签页：请允许本网站弹出窗口后再点一次发送。' },\nen: { m: 'squadron members', b: 'squadron battles', d: 'arena duels opened', l: 'in the Arena list', r: 'roster', y: 'yes', n: 'not yet', h: 'Now browse Battle Log › Squadron (50 per page, every page), open Battle Log › Arena, and open Squadron Groups. View battle is only needed for opponents never seen in a squadron battle. Keep this tab open.', s: 'Send to planner ↗', p: 'The browser blocked the new tab: allow pop-ups for this site, then click Send again.' }\n};\nreturn T[n.indexOf('es') === 0 ? 'es' : (n.indexOf('zh') === 0 ? 'zh' : 'en')];\n})();\nfunction draw() {\nif (!G.box) return;\nvar n = Object.keys(G.squad).length, d = Object.keys(G.duels).length, l = Object.keys(G.list).length;\nG.box.querySelector('.c').textContent = n + ' ' + L.b + ', ' + l + ' ' + L.l + ', ' + d + ' ' + L.d + ', ' + L.r + ': ' + (G.roster || (state() && sqLive(state(), null)) ? L.y : L.n) + (function () { var st = state(), m = st ? sqNames(st) : []; return m.length ? ', ' + m[0].names.length + ' ' + L.m : ''; })();\n}\nfunction show() {\nif (G.box) { G.box.style.display = 'block'; return; }\nvar b = document.createElement('div');\nb.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;background:#1a2129;color:#d5dde6;border:1px solid #4fb3e8;border-radius:10px;padding:10px 12px;font:13px sans-serif;max-width:300px;box-shadow:0 4px 16px rgba(0,0,0,.4)';\nb.innerHTML = '<b>PvP Planner<\/b> <span style=\"float:right;cursor:pointer\" class=\"x\">✕<\/span><div class=\"c\" style=\"margin:6px 0\"><\/div>' +\n'<div class=\"h\" style=\"font-size:11px;color:#9aa8b6;margin-bottom:8px\"><\/div>' +\n'<button class=\"s\" style=\"background:#4fb3e8;color:#0d1b24;border:0;border-radius:7px;padding:6px 12px;font-weight:600;cursor:pointer\"><\/button>';\nb.querySelector('.s').textContent = L.s;\nb.querySelector('.h').textContent = L.h;\nb.querySelector('.x').onclick = function () { b.style.display = 'none'; };\nb.querySelector('.s').onclick = send;\ndocument.body.appendChild(b);\nG.box = b; draw();\n}\nwindow.__sopvpGrab = { show: show, data: G };\ntick(); show();\n})();";
 
   /* ============================================================
@@ -1329,14 +1329,14 @@
       PV_SEARCH_MAX: PV_SEARCH_MAX, PV_SEED: PV_SEED, PV_SIMS: PV_SIMS,
       PV_META: PV_META, PV_META_COPIES: PV_META_COPIES,
       RL_A: RL_A, RL_B: RL_B, RL_MAX_CLONES: RL_MAX_CLONES, RL_MAX_ROUNDS: RL_MAX_ROUNDS, SQ_MAX_ROUNDS: SQ_MAX_ROUNDS, PV_CLIMB_SIMS: PV_CLIMB_SIMS, AR_PAIR: AR_PAIR,
-      GB_SIZE: GB_SIZE, GB_PERM_MAX: GB_PERM_MAX, GB_WANT: GB_WANT
+      GB_SIZE: GB_SIZE, GB_PERM_MAX: GB_PERM_MAX, GB_WANT: GB_WANT, GB_PLANS: GB_PLANS, GB_MARGIN: GB_MARGIN, SQ_DEB: SQ_DEB
     };
   }
   function WK_FNS() {
     return [numOr, btRng, arAssume, arDraws, arSide, pvAllocate, pvBestAssign, pvClimb, pvKeepGear, pvCompositions, pvCopy, pvGap, pvGearBase, pvGearVal, pvLevelCost,
       pvMetaPool, pvNeedFor, pvToughen, pvPlanRun, pvPool, pvPoolRef, pvReplay, pvSample, pvScore, pvScoreOf, pvSkills, pvSpend, pvTerm, pvTargetRun,
       pvTierCost, pvTotals, pvUpgradeRows, rlDuel, rlLeft, rlLoad, rlMe, rlPhase, rlSlot, rngStreams,
-      sqDebuff, sqFloor, sqSide, sqEnter, sqHealth, sqLeft, sqPhase, sqFight, gbNorm, gbDraw, gbGroup, gbDuo, gbPerms, gbStr, gbOrder, gbOptimise, gbBeat];
+      sqDebuff, sqFloor, sqLuck, sqRoll, sqNm, sqHpTxt, sqSide, sqEnter, sqHealth, sqLeft, sqPhase, sqFight, gbNorm, gbDraw, gbGroup, gbDuoSum, gbDuoAdd, gbDuoOf, gbDuo, gbPerms, gbStr, gbOrder, gbOptimise, gbScoreOf, gbScore];
   }
   function wkMain() {
     self.onmessage = function (e) {
@@ -1348,9 +1348,17 @@
           self.postMessage({ type: 'done' });
           return;
         }
-        if (job.kind === 'gbb') {
-          self.postMessage({ type: 'gbb', res: gbBeat(job.pool, job.foe, job.opt, function (t) { self.postMessage({ type: 'prog', t: t }); }) });
-          self.postMessage({ type: 'done' });
+        // one of the workers of a search (1.20.0, gbWorkers): first the members, then
+        // batches of fights, until the page closes it
+        if (job.kind === 'pool') {
+          var by = {};
+          job.pool.forEach(function (m) { by[m.id] = m; });
+          self.SQP = { by: by, foe: job.foe };
+          return;
+        }
+        if (job.kind === 'sum') {
+          var P = self.SQP;
+          self.postMessage({ type: 'sum', id: job.id, sum: gbDuoSum(job.ids.map(function (x) { return P.by[x]; }), P.foe, job.from, job.to, job.seed) });
           return;
         }
         if (job.kind === 'gbd') {
@@ -1380,6 +1388,59 @@
         self.postMessage({ type: 'error', err: String((err && err.message) || err) });
       }
     };
+  }
+
+  /* The fights of one search shared between background workers (1.20.0): one per
+     processor thread but one (left for the page and the game), at most 12. Each worker
+     gets the members once, then batches (one order, a range of fights); a batch of many
+     fights is split so all the workers help. The sums add up to exactly what one worker
+     would find. Same use as gbLocal (gb.js); null when the browser gives no worker. */
+  function gbThreads() { return Math.max(1, Math.min(12, ((typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 2) - 1)); }
+  function gbWorkers(pool, foe) {
+    var ws = [], idle = [], queue = [], busy = {}, seq = 0, dead = null, n = gbThreads();
+    var X = { n: 0, stop: false, score: score, close: close };
+    function fail(err) {
+      if (dead) return;
+      dead = String(err || 'a worker stopped');
+      Object.keys(busy).forEach(function (k) { busy[k].no(dead); });
+      queue.forEach(function (t) { t.no(dead); });
+      busy = {}; queue = [];
+      close();
+    }
+    function pump() {
+      while (!dead && idle.length && queue.length) {
+        var w = idle.pop(), t = queue.shift();
+        t.id = ++seq; t.w = w; busy[t.id] = t;
+        w.postMessage({ kind: 'sum', id: t.id, ids: t.ids, from: t.from, to: t.to, seed: t.seed });
+      }
+    }
+    for (var k = 0; k < n; k++) (function () {
+      var w = wkRun({ kind: 'pool', pool: pool, foe: foe }, function (m) {
+        if (m.type === 'sum') { var t = busy[m.id]; delete busy[m.id]; idle.push(w); if (t) t.ok(m.sum); pump(); }
+        else if (m.type === 'error') fail(m.err);
+      });
+      if (w) { ws.push(w); idle.push(w); }
+    })();
+    if (!ws.length) return null;
+    X.n = ws.length;
+    function run(ids, from, to, seed) {
+      return new Promise(function (ok, no) {
+        if (dead) { no(dead); return; }
+        queue.push({ ids: ids, from: from, to: to, seed: seed, ok: ok, no: no });
+        pump();
+      });
+    }
+    function score(orders, sims, seed) {
+      // few orders with many fights each: each split in parts of at least 250 fights
+      var parts = Math.max(1, Math.min(Math.floor(sims / 250), Math.ceil(2 * X.n / Math.max(1, orders.length))));
+      return Promise.all(orders.map(function (ids) {
+        var size = Math.ceil(sims / parts), ps = [];
+        for (var a = 0; a < sims; a += size) ps.push(run(ids, a, Math.min(sims, a + size), seed));
+        return Promise.all(ps).then(function (ss) { return gbScoreOf(gbDuoOf(ss.reduce(gbDuoAdd, null)), ids.length, foe.length); });
+      }));
+    }
+    function close() { if (!dead) dead = 'closed'; ws.forEach(function (w) { try { w.terminate(); } catch (e) {} }); ws = []; idle = []; }
+    return X;
   }
 
   /* ---- from the API's account snapshot to the shape the planner reads ----
@@ -2727,6 +2788,25 @@
   var SQ_MAX_ROUNDS = 300;
 
   function sqDebuff(k) { return k > 0 ? 1 - Math.min(0.9, 0.2 * Math.pow(1.25, k - 1)) : 1; }
+  // 1.20.0 (speed): the debuff after 0..63 kills, worked out once.
+  var SQ_DEB = (function () { var o = []; for (var k = 0; k < 64; k++) o.push(sqDebuff(k)); return o; })();
+  /* The fight's luck (1.20.0, speed): the same 11 streams as rngStreams + btRng gave
+     (same seeds, same numbers, so every result is unchanged), kept in one typed array
+     instead of 11 closures. Stream k: 0 dual, 1 pick, 2 hit, 3 block, 4 crit, 5 dot,
+     6 stun, 7 focus, 8 crit2, 9 hit2, 10 block2. */
+  function sqLuck(seed) {
+    var st = new Int32Array(11);
+    for (var k = 0; k < 11; k++) st[k] = (seed | 0) ^ Math.imul(k + 1, 0x9E3779B9);
+    return st;
+  }
+  function sqRoll(st, k) {
+    var a = st[k] = st[k] + 0x6D2B79F5 | 0;
+    var t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  }
+  function sqNm(M, k) { return M.name + "'s Clone " + (k + 1); }
+  function sqHpTxt(T, hp) { return '[' + Math.max(0, hp) + '/' + T.hp + ']'; }
   // A stat under the kill debuff, with the wiki's floor of 100.
   function sqFloor(x, f) { return f < 1 ? Math.max(Math.min(x, 100), x * f) : x; }
 
@@ -2770,15 +2850,13 @@
   function sqPhase(a, d, R, round, log) {
     if (a.i >= a.m.length || a.alive <= 0) return;
     var S = a.m[a.i], n = S.N, i;
-    function nm(M, k) { return M.name + "'s Clone " + (k + 1); }
-    function hpTxt(T, t, hp) { return '[' + Math.max(0, hp) + '/' + T.hp + ']'; }
     for (i = 0; i < n; i++) {
       if (d.i >= d.m.length) return;
       if (a.hp[i] <= 0) continue;
-      if (a.st[i]) { a.st[i] = 0; if (log) log.push({ round: round, attacker: nm(S, i), defender: null, action: 'is stunned', value: 0, hpLeft: '' }); continue; }
-      var T = d.m[d.i], cl = S.cl[i % S.cl.length], fa = sqDebuff(a.kills), ft = sqDebuff(d.kills);
-      var dual = R.dual() < cl.dual, pick = Math.floor(R.pick() * d.alive), t, k;
-      var rHit = R.hit(), rBlock = R.block(), rCrit = R.crit(), rCrit2 = R.crit2(), rDot = R.dot(), rStun = R.stun(), rFocus = R.focus(), rHit2 = R.hit2(), rBlock2 = R.block2();
+      if (a.st[i]) { a.st[i] = 0; if (log) log.push({ round: round, attacker: sqNm(S, i), defender: null, action: 'is stunned', value: 0, hpLeft: '' }); continue; }
+      var T = d.m[d.i], cl = S.cl[i % S.cl.length], fa = a.kills < 64 ? SQ_DEB[a.kills] : sqDebuff(a.kills), ft = d.kills < 64 ? SQ_DEB[d.kills] : sqDebuff(d.kills);
+      var dual = sqRoll(R, 0) < cl.dual, pick = Math.floor(sqRoll(R, 1) * d.alive), t, k;
+      var rHit = sqRoll(R, 2), rBlock = sqRoll(R, 3), rCrit = sqRoll(R, 4), rCrit2 = sqRoll(R, 8), rDot = sqRoll(R, 5), rStun = sqRoll(R, 6), rFocus = sqRoll(R, 7), rHit2 = sqRoll(R, 9), rBlock2 = sqRoll(R, 10);
       var P = sqFloor(S.prec, fa), E = sqFloor(T.eva, ft), ph = P / (P + E);
       if (dual && (rHit2 >= ph || (T.sk.block > 0 && rBlock2 < T.sk.block))) dual = false;
       if (d.mark >= 0 && d.hp[d.mark] > 0) t = d.mark;
@@ -2787,30 +2865,30 @@
         for (k = 0; k < T.N; k++) if (d.hp[k] > 0) { if (pick === 0) { t = k; break; } pick--; }
       }
       if (t < 0) return;
-      if (rHit >= ph) { if (log) log.push({ round: round, attacker: nm(S, i), defender: nm(T, t), action: 'misses hit on', value: 0, hpLeft: hpTxt(T, t, d.hp[t]) }); continue; }
+      if (rHit >= ph) { if (log) log.push({ round: round, attacker: sqNm(S, i), defender: sqNm(T, t), action: 'misses hit on', value: 0, hpLeft: sqHpTxt(T, d.hp[t]) }); continue; }
       var dead = false;
-      if (S.sk.focus > 0 && d.mark < 0 && rFocus < S.sk.focus) { d.mark = t; if (log) log.push({ round: round, attacker: nm(S, i), defender: nm(T, t), action: 'focused', value: 0, hpLeft: hpTxt(T, t, d.hp[t]) }); }
-      if (S.sk.dot > 0 && rDot < S.sk.dot) { d.ch[t] = 3; if (log) log.push({ round: round, attacker: nm(S, i), defender: nm(T, t), action: 'applies DoT', value: 0, hpLeft: hpTxt(T, t, d.hp[t]) }); }
+      if (S.sk.focus > 0 && d.mark < 0 && rFocus < S.sk.focus) { d.mark = t; if (log) log.push({ round: round, attacker: sqNm(S, i), defender: sqNm(T, t), action: 'focused', value: 0, hpLeft: sqHpTxt(T, d.hp[t]) }); }
+      if (S.sk.dot > 0 && rDot < S.sk.dot) { d.ch[t] = 3; if (log) log.push({ round: round, attacker: sqNm(S, i), defender: sqNm(T, t), action: 'applies DoT', value: 0, hpLeft: sqHpTxt(T, d.hp[t]) }); }
       if (d.ch[t] > 0) {
         d.ch[t]--;
         var burn = Math.floor(S.dmg * 0.5);
         d.hp[t] -= burn;
-        if (log) log.push({ round: round, attacker: nm(S, i), defender: nm(T, t), action: 'DoT triggers', value: burn, hpLeft: hpTxt(T, t, d.hp[t]) });
+        if (log) log.push({ round: round, attacker: sqNm(S, i), defender: sqNm(T, t), action: 'DoT triggers', value: burn, hpLeft: sqHpTxt(T, d.hp[t]) });
         if (d.hp[t] <= 0) dead = true;
       }
       if (!dead) {
-        if (T.sk.block > 0 && rBlock < T.sk.block) { if (log) log.push({ round: round, attacker: nm(S, i), defender: nm(T, t), action: 'attack blocked', value: 0, hpLeft: hpTxt(T, t, d.hp[t]) }); continue; }
+        if (T.sk.block > 0 && rBlock < T.sk.block) { if (log) log.push({ round: round, attacker: sqNm(S, i), defender: sqNm(T, t), action: 'attack blocked', value: 0, hpLeft: sqHpTxt(T, d.hp[t]) }); continue; }
         var mult = (rCrit < cl.crit ? cl.cm : 1) + (dual ? (rCrit2 < cl.crit ? cl.cm : 1) : 0);
         var dmg = Math.floor(sqFloor(S.dmg, fa) * mult), before = d.hp[t];
         d.hp[t] -= dmg;
-        if (log) log.push({ round: round, attacker: nm(S, i), defender: nm(T, t), action: 'attacks', value: Math.min(dmg, Math.max(0, before)), hpLeft: hpTxt(T, t, d.hp[t]) });
+        if (log) log.push({ round: round, attacker: sqNm(S, i), defender: sqNm(T, t), action: 'attacks', value: Math.min(dmg, Math.max(0, before)), hpLeft: sqHpTxt(T, d.hp[t]) });
         if (d.hp[t] <= 0) dead = true;
-        else if (S.sk.stun > 0 && !d.st[t] && rStun < S.sk.stun) { d.st[t] = 1; if (log) log.push({ round: round, attacker: nm(S, i), defender: nm(T, t), action: 'stuns', value: 0, hpLeft: hpTxt(T, t, d.hp[t]) }); }
+        else if (S.sk.stun > 0 && !d.st[t] && rStun < S.sk.stun) { d.st[t] = 1; if (log) log.push({ round: round, attacker: sqNm(S, i), defender: sqNm(T, t), action: 'stuns', value: 0, hpLeft: sqHpTxt(T, d.hp[t]) }); }
       }
       if (dead) {
         d.alive--;
         if (d.mark === t) d.mark = -1;
-        if (log) log.push({ round: round, attacker: null, defender: nm(T, t), action: 'dies', value: 0, hpLeft: '' });
+        if (log) log.push({ round: round, attacker: null, defender: sqNm(T, t), action: 'dies', value: 0, hpLeft: '' });
         if (d.alive <= 0) {
           a.kills++;
           a.kb[a.i] = (a.kb[a.i] || 0) + 1;   // members beaten, per member of the side (1.11.5)
@@ -2826,7 +2904,7 @@
   // members. Returns {win: 1 when A wins, rounds, healthA, healthD, outA,
   // outD (members lost)}; with wantLog, also the log in the game's format.
   function sqFight(A, D, seed, wantLog) {
-    var R = rngStreams(seed, ['dual', 'pick', 'hit', 'block', 'crit', 'dot', 'stun', 'focus', 'crit2', 'hit2', 'block2']);
+    var R = sqLuck(seed);
     var a = sqSide(A), d = sqSide(D), r, log = wantLog ? [] : null;
     sqEnter(a); sqEnter(d);
     for (r = 1; r <= SQ_MAX_ROUNDS && a.i < A.length && d.i < D.length; r++) {
@@ -2928,22 +3006,36 @@
   // One of our groups against one enemy group, for the Battlefield panels (1.11.5): the
   // chance attacking and defending, and how many enemy members each of ours beats on
   // average (and each of theirs beats of ours), with the same draws as gbGroup.
-  function gbDuo(G, E0, sims, seed) {
-    var kM = G.map(function () { return 0; }), kE = E0.map(function () { return 0; }), wa = 0, wd = 0, rr = 0, oM = 0, oE = 0;
-    for (var i = 0; i < sims; i++) {
+  // 1.20.0: worked out from the sums of fights from..to-1 (gbDuoSum). Fight i always has
+  // the same luck, and sums of different ranges add up exactly (gbDuoAdd), so the fights
+  // can be shared between workers with the very same answer.
+  function gbDuoSum(G, E0, from, to, seed) {
+    var kM = G.map(function () { return 0; }), kE = E0.map(function () { return 0; }), wa = 0, wd = 0, na = 0, nd = 0, rr = 0, oM = 0, oE = 0;
+    for (var i = from; i < to; i++) {
       var s = (seed + i * 7919) | 0, r = btRng(s ^ 0x5bd1e995);
       var E = E0.map(function (m) { return gbDraw(m, r); });
       var att = i % 2 === 0, f = att ? sqFight(G, E, s, false) : sqFight(E, G, s, false);
       var mine = att ? f.kbA : f.kbD, theirs = att ? f.kbD : f.kbA;
       for (var a = 0; a < G.length; a++) kM[a] += mine[a] || 0;
       for (var b = 0; b < E0.length; b++) kE[b] += theirs[b] || 0;
-      if (att) wa += f.win; else wd += 1 - f.win;
+      if (att) { wa += f.win; na++; } else { wd += 1 - f.win; nd++; }
       rr += f.rounds; oM += att ? f.outA : f.outD; oE += att ? f.outD : f.outA;
     }
-    var na = Math.ceil(sims / 2), nd = Math.floor(sims / 2), p = (wa + wd) / sims;
-    return { p: p, pA: na ? wa / na : 0, pD: nd ? wd / nd : 0, se: Math.sqrt(Math.max(p * (1 - p), 0.25 / sims) / sims), n: sims, rounds: rr / sims,
-      kM: kM.map(function (x) { return x / sims; }), kE: kE.map(function (x) { return x / sims; }), lostM: oM / sims, lostE: oE / sims };
+    return { n: to - from, wa: wa, wd: wd, na: na, nd: nd, rr: rr, oM: oM, oE: oE, kM: kM, kE: kE };
   }
+  function gbDuoAdd(A, B) {
+    if (!A) return B;
+    var o = {};
+    ['n', 'wa', 'wd', 'na', 'nd', 'rr', 'oM', 'oE'].forEach(function (k) { o[k] = A[k] + B[k]; });
+    o.kM = A.kM.map(function (x, k) { return x + B.kM[k]; }); o.kE = A.kE.map(function (x, k) { return x + B.kE[k]; });
+    return o;
+  }
+  function gbDuoOf(S) {
+    var sims = S.n, p = (S.wa + S.wd) / sims;
+    return { p: p, pA: S.na ? S.wa / S.na : 0, pD: S.nd ? S.wd / S.nd : 0, se: Math.sqrt(Math.max(p * (1 - p), 0.25 / sims) / sims), n: sims, rounds: S.rr / sims,
+      kM: S.kM.map(function (x) { return x / sims; }), kE: S.kE.map(function (x) { return x / sims; }), lostM: S.oM / sims, lostE: S.oE / sims };
+  }
+  function gbDuo(G, E0, sims, seed) { return gbDuoOf(gbDuoSum(G, E0, 0, sims, seed)); }
 
   function gbPerms(n) {
     var out = [];
@@ -2985,62 +3077,270 @@
     return best;
   }
 
-  /* Beat this group (1.18.0): which of our members, how many and in what order to
-     send against ONE enemy group. Members are added one at a time, each time the one
-     that raises the chance most (any of the squad, whatever group they are in now),
-     so the answer is a curve: the best group of 1, of 2, ... up to 12. The smallest
-     group reaching opt.want (70%) is suggested; if none does, the best one found.
-     That group then gets one pass of member swaps with those left out, its best
-     order, and a final test with gbDuo (attacking / defending, who beats whom).
-     Returns ids only (the page maps them back). */
-  var GB_WANT = 0.7;
-  function gbBeat(pool, foe, opt, progress) {
+  /* Best order (1.19.0). The score of a line-up against one enemy group is its win
+     chance plus its margin: every member of ours still standing at the end, and every
+     enemy member beaten, is worth 1 point of win chance (GB_MARGIN). So when two orders
+     both win about always, the one that wins with more members left is better (more
+     room for bad luck), and the search never stops just because the chance is high. */
+  var GB_MARGIN = 0.01;
+  function gbScoreOf(d, nG, nE) {
+    d.keep = nG - d.lostM; d.left = nE - d.lostE;
+    d.s = d.p + GB_MARGIN * (d.keep - d.left);
+    return d;
+  }
+  function gbScore(G, foe, sims, seed) { return gbScoreOf(gbDuo(G, foe, sims, seed), G.length, foe.length); }
+
+  /* Who runs the fights of a search (1.20.0). X.score(orders, sims, seed): orders are
+     lists of member ids; answers (a promise) one gbScore per order. X.n: how many run at
+     once; X.stop: set by the Stop button, the search then ends with the best found so
+     far. gbLocal runs them here, one after another (Node, tests, a browser without
+     workers); the page's gbWorkers shares them between background workers. */
+  function gbLocal(pool, foe) {
+    var by = {};
+    pool.forEach(function (m) { by[m.id] = m; });
+    return { n: 1, stop: false, close: function () {},
+      score: function (orders, sims, seed) {
+        // a pause first (1.20.1): the page repaints and the Stop button can be clicked
+        return new Promise(function (ok) { setTimeout(ok, 0); }).then(function () {
+          return orders.map(function (ids) { return gbScore(ids.map(function (x) { return by[x]; }), foe, sims, seed); });
+        });
+      } };
+  }
+
+  // The best order of one group against one enemy group. Up to GB_PERM_MAX members every
+  // order is tried; above, climbs: from the best of the current order, weakest first and
+  // strongest first, and from shuffled orders (so a dead end is not taken for the best).
+  // A climb tries every move of the member at one place to another place and every swap
+  // with a later one, all at once (1.20.0: shared between the workers), keeps the best
+  // that scores higher, and goes on place by place until a whole round changes nothing.
+  // With several workers, several climbs run side by side, and more of them in all.
+  // All orders are screened with opt.simsScreen fights (the same luck for each, so their
+  // differences are steady), the best 8 are tested again with simsMid fights and the
+  // best 3 with opt.sims (5,000) fights. opt.base: also test the order given, with the
+  // same fights as the final ones, for the comparison. Returns a promise.
+  function gbBestOrder(G0, foe, opt, progress, X) {
     opt = opt || {};
-    var enemies = [foe], seed = opt.seed || 23, want = opt.want || GB_WANT, t0 = Date.now(), until = t0 + (opt.budgetMs || 45000), partial = false;
-    var big = Math.max(1, (pool.length + foe.length) / 12);
-    var simsQ = opt.simsQuick || Math.max(24, Math.round(60 / big)), simsC = opt.simsCurve || 200, simsF = opt.simsFinal || 1000;
-    var max = Math.min(opt.size || GB_SIZE, pool.length), id = function (m) { return m.id; };
-    function q(G) { return gbOrder(G, enemies, simsQ, seed, true); }
-    // 1. the curve: add the member that helps most, one at a time
-    var chosen = [], left = pool.slice(), steps = [];
-    while (chosen.length < max && left.length && !partial) {
-      var best = null, bi = -1;
-      for (var i = 0; i < left.length; i++) {
-        if (Date.now() > until - 15000 && best) { partial = true; break; }
-        var r = q(chosen.concat([left[i]]));
-        // a tie (often 0% for everyone while the group is small): the stronger member
-        if (!best || r.p > best.p + 1e-9 || (r.p > best.p - 1e-9 && gbStr(left[i]) > gbStr(left[bi]))) { best = r; bi = i; }
+    var own = !X; X = X || gbLocal(G0, foe);
+    var n = G0.length, seed = opt.seed || 29, simsS = opt.simsScreen || 300, simsF = opt.sims || 5000, simsM = Math.min(simsF, opt.simsMid || 1500);
+    var t0 = Date.now(), budget = opt.budgetMs || 120000, until = t0 + budget, shut = t0 + budget * 0.7, seen = {}, evals = 0, ended = 0, best = null, cut = false;
+    var key = function (ids) { return ids.join('\u0001'); }, id = function (m) { return m.id; };
+    var by = function (a, b) { var ka, kb; return b.d.s - a.d.s || ((ka = key(a.ids)) < (kb = key(b.ids)) ? -1 : (ka > kb ? 1 : 0)); };
+    function late() { if (X.stop) cut = true; return X.stop || Date.now() > shut; }
+    function pct(e) { return Math.round(e.d.p * 100) + '%, ' + (Math.round(e.d.keep * 10) / 10) + ' left'; }
+    // a batch of orders, each screened once for all the climbs
+    function ev(list) {
+      var todo = [], out = list.map(function (ids) {
+        var k = key(ids);
+        if (!seen[k]) { seen[k] = { ids: ids, d: null, w: null }; todo.push(seen[k]); }
+        return seen[k];
+      });
+      if (todo.length) {
+        var w = X.score(todo.map(function (e) { return e.ids; }), simsS, seed).then(function (ds) { ds.forEach(function (d, k) { todo[k].d = d; }); evals += todo.length; });
+        todo.forEach(function (e) { e.w = w.then(function () { return e; }); });
       }
-      left.splice(bi, 1);
-      chosen = best.g.slice();
-      steps.push({ n: chosen.length, ids: chosen.map(id), p: gbGroup(chosen, enemies, simsC, seed + 1).p });
-      if (progress) progress('Trying groups of ' + chosen.length + ' (best so far ' + Math.round(steps[steps.length - 1].p * 100) + '%)');
-      if (best.p >= 0.99 && steps[steps.length - 1].p >= 0.97) break;   // already sure: more members change nothing
+      return Promise.all(out.map(function (e) { return e.w; }));
     }
-    var pick = -1;
-    steps.forEach(function (s, k) { if (pick < 0 && s.p >= want) pick = k; });
-    // none reaches it: the best, and among about-equal ones the biggest (more of theirs beaten)
-    if (pick < 0) { var top = Math.max.apply(null, steps.map(function (s) { return s.p; })); steps.forEach(function (s, k) { if (s.p >= top - 0.01) pick = k; }); }
-    // 2. that group: swap a member for one left out when it wins more
-    var byId = {};
+    function note(e) { if (!best || e.d.s > best.d.s) best = e; }
+    function climb(start) {
+      return ev([start]).then(function (r) {
+        var cur = r[0], i = 0, still = 0;
+        note(cur);
+        function step() {
+          if (still >= n) { ended++; return cur; }
+          if (late()) return cur;
+          var list = [];
+          for (var j = 0; j < n; j++) {
+            if (j === i) continue;
+            var c = cur.ids.slice(), m = c.splice(i, 1)[0];
+            c.splice(j, 0, m); list.push(c);
+            if (j > i) { var w = cur.ids.slice(), x = w[i]; w[i] = w[j]; w[j] = x; list.push(w); }
+          }
+          return ev(list).then(function (es) {
+            var b = cur;
+            es.forEach(function (e) { if (e.d.s > b.d.s + 1e-9) b = e; });
+            if (b !== cur) { cur = b; still = 0; note(b); } else still++;
+            i = (i + 1) % n;
+            if (progress) progress('Trying orders: ' + evals + ' tried, best so far ' + pct(best));
+            return step();
+          });
+        }
+        return step();
+      });
+    }
+    var search;
+    if (n <= GB_PERM_MAX) search = ev(gbPerms(n).map(function (pm) { return pm.map(function (i) { return G0[i].id; }); }));
+    else {
+      // side by side: 1 climb on a small device, up to 4 with many workers; in all
+      // 1 + opt.restarts climbs per lane, while time is left
+      var lanes = X.n >= 4 ? Math.min(4, Math.floor(X.n / 2)) : 1, total = (1 + (opt.restarts === undefined ? 4 : opt.restarts)) * lanes, next = 1, rng = btRng(seed * 7 + 3);
+      var up = G0.slice().sort(function (a, b) { return gbStr(a) - gbStr(b); }).map(id);
+      var shuffled = function () {
+        var sh = G0.map(id);
+        for (var k = sh.length - 1; k > 0; k--) { var z = Math.floor(rng() * (k + 1)), y = sh[k]; sh[k] = sh[z]; sh[z] = y; }
+        return sh;
+      };
+      var lane = function () {
+        if (next >= total || late()) return Promise.resolve();
+        next++;
+        return climb(shuffled()).then(lane);
+      };
+      search = ev([G0.map(id), up, up.slice().reverse()]).then(function (es) {
+        var first = es.slice().sort(by)[0].ids, runs = [climb(first).then(lane)];
+        for (var k = 1; k < lanes; k++) runs.push(lane());
+        return Promise.all(runs);
+      });
+    }
+    var res = search.then(function () {
+      var all = Object.keys(seen).map(function (k) { return seen[k]; }).filter(function (e) { return e.d; }).sort(by), top = all.slice(0, 8);
+      if (progress) progress('Testing the best ' + top.length + ' orders again with ' + simsM + ' fights');
+      return (simsM > simsS ? X.score(top.map(function (e) { return e.ids; }), simsM, seed + 1) : Promise.resolve(top.map(function (e) { return e.d; }))).then(function (ds) {
+        var mid = top.map(function (e, k) { return { ids: e.ids, d: ds[k] }; }).sort(by).slice(0, 3), list = mid.map(function (e) { return e.ids; });
+        if (opt.base) list.push(G0.map(id));
+        if (progress) progress('Final check of the best ' + mid.length + ' with ' + simsF + ' fights each');
+        return X.score(list, simsF, seed + 2).then(function (ds2) {
+          var fin = mid.map(function (e, k) { return { ids: e.ids, d: ds2[k] }; }).sort(by);
+          // partial: not even one climb could end in time (stopped by hand is told apart)
+          var partial = !cut && ((n > GB_PERM_MAX && !ended) || Date.now() > until);
+          return { ids: fin[0].ids, duo: fin[0].d, base: opt.base ? ds2[mid.length] : null, evals: evals, climbs: ended, partial: partial, stopped: cut, threads: X.n, secs: Math.round((Date.now() - t0) / 1000) };
+        });
+      });
+    });
+    return own ? res.then(function (r) { X.close(); return r; }, function (e) { X.close(); throw e; }) : res;
+  }
+
+  /* Beat this group (1.18.0, 1.19.0): which of our members, how many and in what order
+     to send against ONE enemy group, for two targets at once (GB_PLANS):
+       safe  = wins at least 90% with 2 of ours still standing on average,
+       risky = wins at least 70% with 1 still standing (frees members for other groups).
+     Members are added one at a time, each time the one that scores most (any of the
+     squad, whatever group they are in now; each try in the better of weakest-first and
+     strongest-first), so the answer is a curve: the best group of 1, of 2, ... up to 12,
+     each tested with opt.simsCurve fights. Each target takes the smallest group on the
+     curve that meets it (none: the best group found). That group then gets one pass of
+     member swaps with those left out, its best order (gbBestOrder) and its final test.
+     Returns ids only (the page maps them back). */
+  var GB_PLANS = { safe: { p: 0.9, keep: 2 }, risky: { p: 0.7, keep: 1 } };
+  var GB_WANT = GB_PLANS.risky.p;
+  // 1.20.0: returns a promise; X (gbLocal, or the page's workers) runs the fights, and
+  // every batch of groups is tried at once so the workers share it.
+  function gbBeat(pool, foe, opt, progress, X) {
+    opt = opt || {};
+    var own = !X; X = X || gbLocal(pool, foe);
+    var seed = opt.seed || 23, t0 = Date.now(), budget = opt.budgetMs || 300000, until = t0 + budget, partial = false, cut = false;
+    var big = Math.max(1, (pool.length + foe.length) / 12), plans = opt.plans || GB_PLANS;
+    var simsQ = opt.simsQuick || Math.max(60, Math.round(150 / big)), simsC = opt.simsCurve || 1000, simsF = opt.simsFinal || 5000;
+    var max = Math.min(opt.size || GB_SIZE, pool.length), id = function (m) { return m.id; }, byId = {};
     pool.forEach(function (m) { byId[m.id] = m; });
-    var G = steps[pick].ids.map(function (k) { return byId[k]; }), out = pool.filter(function (m) { return G.indexOf(m) < 0; });
-    var cur = q(G);
-    for (var a = 0; a < G.length && !partial; a++) {
-      for (var b = 0; b < out.length; b++) {
-        if (Date.now() > until - 8000) { partial = true; break; }
-        var G2 = G.slice(); G2[a] = out[b];
-        var r2 = q(G2);
-        if (r2.p > cur.p + 0.01) { var x = G[a]; G = G2; out[b] = x; cur = r2; }
-      }
+    // for each group, the better of the two simple orders, by score (win chance + members left)
+    function qs(Gs, sims, sd) {
+      var list = [];
+      Gs.forEach(function (G) { var up = G.slice().sort(function (a, b) { return gbStr(a) - gbStr(b); }).map(id); list.push(up); if (G.length > 1) list.push(up.slice().reverse()); });
+      return X.score(list, sims, sd).then(function (ds) {
+        var k = 0;
+        return Gs.map(function (G) {
+          var a = { g: list[k], d: ds[k] }; k++;
+          if (G.length > 1) { var b = { g: list[k], d: ds[k] }; k++; if (b.d.s > a.d.s) a = b; }
+          return a;
+        });
+      });
     }
-    // 3. its best order, then the final test
-    if (progress) progress('Choosing the order of ' + G.length + ' members');
-    G = gbOrder(G, enemies, Math.max(40, simsQ), seed + 2, false, until).g;
-    if (Date.now() > until) partial = true;
-    if (progress) progress('Final check with ' + simsF + ' fights');
-    var duo = gbDuo(G, foe, simsF, seed + 3);
-    return { ids: G.map(id), duo: duo, steps: steps, pick: pick, want: want, partial: partial, secs: Math.round((Date.now() - t0) / 1000) };
+    // 1. the curve (opt.steps: the curve of an earlier search, when only a target changed)
+    var chosen = [], left = pool.slice(), steps = opt.steps ? opt.steps.slice() : [];
+    function grow() {
+      if (X.stop && steps.length) cut = true;
+      if (opt.steps || chosen.length >= max || !left.length || cut) return Promise.resolve();
+      if (steps.length && Date.now() > t0 + budget * 0.3) { partial = true; return Promise.resolve(); }
+      return qs(left.map(function (m) { return chosen.concat([m]); }), simsQ, seed).then(function (rs) {
+        var best = null, bi = -1;
+        // a tie (often 0% for everyone while the group is small): the stronger member
+        rs.forEach(function (r, i) { if (!best || r.d.s > best.d.s + 1e-9 || (r.d.s > best.d.s - 1e-9 && gbStr(left[i]) > gbStr(left[bi]))) { best = r; bi = i; } });
+        left.splice(bi, 1);
+        chosen = best.g.map(function (x) { return byId[x]; });
+        return X.score([best.g], simsC, seed + 1).then(function (ds) {
+          var cd = ds[0];
+          steps.push({ n: chosen.length, ids: best.g.slice(), p: cd.p, keep: cd.keep, s: cd.s });
+          if (progress) progress('Trying groups of ' + chosen.length + ' (' + Math.round(cd.p * 100) + '%, ' + (Math.round(cd.keep * 10) / 10) + ' left)');
+          return grow();
+        });
+      });
+    }
+    var names = Object.keys(plans), picks = {}, out = {}, cache = {}, nSolve = 0;
+    function meets(d, T) { return d.p >= T.p && d.keep >= T.keep; }
+    // a group is only final after its swaps and its best order (which often keeps more of
+    // ours standing), so the next smaller group gets that chance too when it is close
+    function solve(k, nm) {
+      if (cache[k]) return Promise.resolve(cache[k]);
+      var G = steps[k].ids.map(function (x) { return byId[x]; }), rest = pool.filter(function (m) { return G.indexOf(m) < 0; }), cur = 0, stopSwap = 0, a = 0;
+      // one pass of swaps with those left out: at each place, all of them tried at once
+      function swapAt() {
+        if (X.stop && a < G.length && rest.length) cut = true;
+        if (a >= G.length || !rest.length || partial || X.stop || Date.now() > stopSwap) return Promise.resolve();
+        var Gs = rest.map(function (m) { var G2 = G.slice(); G2[a] = m; return G2; });
+        return qs(Gs, 300, seed + 4).then(function (rs) {
+          var bb = -1;
+          rs.forEach(function (r, b) { if (r.d.s > cur + 0.005 && (bb < 0 || r.d.s > rs[bb].d.s)) bb = b; });
+          if (bb >= 0) { var x = G[a]; G = Gs[bb]; rest[bb] = x; cur = rs[bb].d.s; }
+          a++;
+          return swapAt();
+        });
+      }
+      return qs([G], 300, seed + 4).then(function (r0) {
+        cur = r0[0].d.s; stopSwap = Date.now() + Math.max(3000, (until - Date.now()) * 0.15);
+        return swapAt();
+      }).then(function () {
+        // start from the best order of the biggest smaller group already worked out, with
+        // the others at the end: a bigger group then never starts from a worse order
+        var prev = null;
+        Object.keys(cache).forEach(function (j) { if (+j < k && (!prev || +j > prev.pick)) prev = cache[j]; });
+        if (prev) {
+          var inG = {}; G.forEach(function (m) { inG[m.id] = m; });
+          var head = prev.ids.filter(function (x) { return inG[x]; }).map(function (x) { return inG[x]; });
+          G = head.concat(G.filter(function (m) { return head.indexOf(m) < 0; }));
+        }
+        if (progress) progress('Choosing the order of ' + G.length + ' members (' + nm + ')');
+        return gbBestOrder(G, foe, { sims: simsF, restarts: 2, budgetMs: Math.max(Math.min(40000, Math.max(8000, until - Date.now())), Math.min(150000, (until - Date.now()) / Math.max(1, 3 - nSolve))) }, progress, X);
+      }).then(function (o) {
+        nSolve++;
+        if (o.partial) partial = true;
+        if (o.stopped) cut = true;
+        return (cache[k] = { ids: o.ids, duo: o.duo, pick: k, evals: o.evals });
+      });
+    }
+    var res = grow().then(function () {
+      // 2. each target: the smallest group meeting it, else the best one
+      var top = -1;
+      steps.forEach(function (s, k) { if (top < 0 || s.s > steps[top].s + 0.005) top = k; });
+      names.forEach(function (nm) {
+        var T = plans[nm], k = -1;
+        steps.forEach(function (s, j) { if (k < 0 && s.p >= T.p && s.keep >= T.keep) k = j; });
+        picks[nm] = k < 0 ? top : k;
+      });
+      return names.slice().sort(function (a, b) { return picks[a] - picks[b]; }).reduce(function (pr, nm) {
+        return pr.then(function () {
+          var T = plans[nm], k = picks[nm];
+          var smaller = !X.stop && k > 0 && steps[k - 1].p >= T.p - 0.1 && steps[k - 1].keep >= T.keep - 0.5 ? solve(k - 1, nm).then(function (r0) { return meets(r0.duo, T) ? r0 : null; }) : Promise.resolve(null);
+          return smaller.then(function (r) { return r || solve(k, nm); }).then(function (r) {
+            out[nm] = { ids: r.ids, duo: r.duo, pick: r.pick, evals: r.evals, target: T, met: meets(r.duo, T) };
+          });
+        });
+      }, Promise.resolve());
+    }).then(function () {
+      // a bigger group never scores below a smaller one: else the smaller one's order with the others after
+      var pairs = [];
+      names.forEach(function (a) { names.forEach(function (b) { pairs.push([a, b]); }); });
+      return pairs.reduce(function (pr, ab) {
+        return pr.then(function () {
+          var A = out[ab[0]], B = out[ab[1]];
+          if (!(A.ids.length > B.ids.length && A.duo.s < B.duo.s)) return;
+          var ids = B.ids.concat(A.ids.filter(function (x) { return B.ids.indexOf(x) < 0; }));
+          return X.score([ids], simsF, seed + 2).then(function (ds) { var d = ds[0]; if (d.s > A.duo.s) { A.ids = ids; A.duo = d; A.met = meets(d, A.target); } });
+        });
+      }, Promise.resolve());
+    }).then(function () {
+      var main = out.safe || out[names[0]];
+      return { plans: out, ids: main.ids, duo: main.duo, pick: main.pick, steps: steps, want: (main.target || {}).p, partial: partial && !cut, stopped: cut, threads: X.n, secs: Math.round((Date.now() - t0) / 1000) };
+    });
+    return own ? res.then(function (r) { X.close(); return r; }, function (e) { X.close(); throw e; }) : res;
   }
 
   // pool: our members who will play (relay members with .id); start: arrays
@@ -4439,10 +4739,10 @@
   /* ---- Battlefield view (1.11.5): built like the Arena tab. My group | the chance
      (we attack them / they attack us, who beats whom in the relay) | the enemy group,
      then Best groups | Zones on the map (click a zone: its holder becomes the enemy). */
-  var SQV = Object.assign({ g: 1, foe: null, q: '' }, store.get('sqv', {}));
-  function sqvSave() { store.set('sqv', { g: SQV.g, foe: SQV.foe, q: SQV.q }); }
-  var SQ_SIMSL = [200, 500, 1000, 2000];
-  function sqvSims() { var s = +(S.inputs && S.inputs.sqsims) || 1000; return SQ_SIMSL.indexOf(s) >= 0 ? s : 1000; }
+  var SQV = Object.assign({ g: 1, foe: null, q: '', risk: false, keep: null }, store.get('sqv', {}));
+  function sqvSave() { store.set('sqv', { g: SQV.g, foe: SQV.foe, q: SQV.q, risk: !!SQV.risk, keep: SQV.keep || null }); }
+  var SQ_SIMSL = [500, 1000, 2000, 5000, 10000];
+  function sqvSims() { var s = +(S.inputs && S.inputs.sqsims) || 5000; return SQ_SIMSL.indexOf(s) >= 0 ? s : 5000; }
   var SQ_D = { key: null, res: null, busy: false, err: null, at: 0, nonce: 0, pend: false };
   function sqvFoe() {
     var all = sqgFoeGroups(), f = null;
@@ -4570,71 +4870,175 @@
     h += '<div class="sqrelay">' + rl + '</div>';
     if (known.length < foe.m.length) h += line(t('{0} of their members have no build yet and are left out.', [foe.m.length - known.length]), 'warn');
     h += line(t('{0} simulated fights, half attacking, half defending · {1} rounds on average', [grp(res.n), Math.round(res.rounds || 0)]), 'mu');
-    h += '<div class="btns" style="justify-content:center"><button class="pri" id="b_sqbeat" type="button"' + (SQ_B.busy ? ' disabled' : '') + '>' + esc(SQ_B.busy ? t('Working...') : t('Find a group that beats them')) + '</button></div>';
+    h += '<div class="btns" style="justify-content:center"><button class="pri" id="b_sqord" type="button"' + (SQ_O.busy ? ' disabled' : '') + '>' + esc(SQ_O.busy ? t('Working...') : t('Find the best order')) + '</button>' +
+      '<button class="pri" id="b_sqbeat" type="button"' + (SQ_B.busy ? ' disabled' : '') + '>' + esc(SQ_B.busy ? t('Working...') : t('Find a group that beats them')) + '</button></div>';
     return h + again + '</div>';
+  }
+  /* ---- Best order (1.19.0): gbBestOrder on the group shown (members ticked to play)
+     against the enemy group picked. Ranked by win chance, then by our members still
+     standing at the end (GB_MARGIN). The answer is kept for that group, enemy and roster. */
+  var SQ_O = { busy: false, msg: '', res: null, key: '', at: 0 };
+  function sqoKey() { var f = sqvFoe(); return f ? sqgKey(f) + '|' + SQ_ROS.key + '|' + (SQV.g || 1) + '|' + sqvGroup().filter(sqgPlays).map(function (m) { return m.user; }).sort().join(',') : ''; }
+  function sqoRun() {
+    if (SQ_O.busy || SQ_B.busy) return;
+    var foe = sqvFoe(), G = sqvGroup().filter(sqgPlays);
+    if (!foe || !G.length) return;
+    var E = sqgFoeTeam(foe);
+    if (!E.length) { SQ_O.msg = t('None of their members has a build yet.'); sqoRedraw(); return; }
+    var mine = G.map(sqgOwnMember), key = sqoKey(), X = gbWorkers(mine, E) || gbLocal(mine, E);
+    SQ_O.busy = true; SQ_O.res = null; SQ_O.X = X; SQ_O.msg = (X.n > 1 ? t('Working: up to 2 minutes, on {0} threads.', [X.n]) : t('Working: up to 2 minutes, on 1 thread.')); sqvPanelsRedraw(); sqoRedraw();
+    var done = function (res, err) {
+      X.close(); SQ_O.X = null;
+      SQ_O.busy = false;
+      if (err || !res) SQ_O.msg = t('The search failed: {0}', [String(err || 'no answer')]);
+      else { SQ_O.res = res; SQ_O.key = key; SQ_O.at = Date.now(); SQ_O.msg = ''; SQ_O.from = G.map(function (m) { return m.user; }); }
+      sqvPanelsRedraw(); sqoRedraw();
+    };
+    var prog = function (m) { if (X.stop) return; SQ_O.msg = m; var el = root.querySelector('#sqomsg'); if (el) el.textContent = m; };
+    setTimeout(function () {
+      gbBestOrder(mine, E, { sims: sqvSims(), base: true }, prog, X).then(function (res) { done(res, null); }, function (e) { done(null, (e && e.message) || e); });
+    }, 30);
+  }
+  // The Stop button (1.20.0): the search ends with the best found so far (its final check still runs).
+  function sqStopBtn(idb) { return '<div class="btns"><button id="' + idb + '">' + esc(t('Stop, use best so far')) + '</button></div>'; }
+  function sqStopWire(idb, st, msgId) {
+    var b = root.querySelector('#' + idb);
+    if (b) b.addEventListener('click', function () {
+      if (!st.X) return;
+      st.X.stop = true; st.msg = t('Stopping: final check of the best found so far…');
+      var el = root.querySelector('#' + msgId); if (el) el.textContent = st.msg;
+      b.disabled = true;
+    });
+  }
+  function sqoLine(d, n) {
+    return t('{0}% win (attacking {1}%, defending {2}%) · {3} of {4} of yours still standing on average', [Math.round(d.p * 1000) / 10, Math.round(d.pA * 100), Math.round(d.pD * 100), sqvNum(d.keep), n]);
+  }
+  function sqoPanel() {
+    var foe = sqvFoe(), h = '<div class="card ar" id="sqord"><div class="arh">' + esc(t('Best order')) + '</div>';
+    var r = SQ_O.res && SQ_O.key === sqoKey() ? SQ_O.res : null;
+    if (!r || SQ_O.busy) {
+      if (!SQ_O.msg) return '<div id="sqord"></div>';
+      return h + '<div class="line" id="sqomsg">' + esc(SQ_O.msg) + '</div>' + (SQ_O.busy ? sqStopBtn('b_sqostop') : '') + '</div>';
+    }
+    var gi = SQV.g || 1, n = r.ids.length, d = r.duo, now = sqvGroup().filter(sqgPlays).map(function (m) { return m.user; });
+    var same = now.join() === r.ids.join();
+    h += '<div class="arn">' + esc(t('Group {0} against {1}: fight in this order', [gi, sqgFoeName(foe)])) + '</div>';
+    h += '<div class="sqblist">' + r.ids.map(function (u, k) {
+      var was = (SQ_O.from || []).indexOf(u) + 1;
+      return '<div class="sqrow"><span class="sqnm"><b>' + (k + 1) + '. ' + esc(u) + '</b>' + (was && was !== k + 1 ? ' <span class="mu">' + esc(t('(was #{0})', [was])) + '</span>' : '') + '</span>' + sqvBeats(d.kM[k]) + '</div>';
+    }).join('') + '</div>';
+    h += line(t('Best order: {0}', [sqoLine(d, n)]), 'good');
+    if (r.base) h += line(t('The order you had: {0}', [sqoLine(r.base, n)]), r.base.s < d.s - 0.005 ? 'bad' : 'mu');
+    h += line(t('Orders are ranked by win chance, then by how many of yours are still standing at the end: more left = more room for bad luck.'), 'mu');
+    h += line(t('{0} orders tried with 300 fights each; the best 8 tested again with 1,500, the best 3 with {1} each (half attacking, half defending). {2} s.', [grp(r.evals), grp(d.n), r.secs]), 'mu');
+    if (r.stopped) h += line(t('Stopped early: this is the best found so far.'), 'warn');
+    else if (r.partial) h += line(t('Time limit reached: this is the best found so far.'), 'warn');
+    h += '<div class="btns">' + (same ? '<span class="mu">' + esc(t('Your group is already in this order.')) + '</span>' : '<button class="pri" id="b_sqouse">' + esc(t('Use this order')) + '</button>') + '</div>';
+    return h + '</div>';
+  }
+  function sqoRedraw() {
+    var box = root.querySelector('#sqord');
+    if (!box) return;
+    box.outerHTML = sqoPanel();
+    sqoWire();
+  }
+  function sqoWire() {
+    sqStopWire('b_sqostop', SQ_O, 'sqomsg');
+    var u = root.querySelector('#b_sqouse');
+    if (u) u.addEventListener('click', function () {
+      var r = SQ_O.res, gi = (SQV.g || 1) - 1, G = sqgMyGroups(), g = G[gi], byUser = {};
+      g.forEach(function (m) { byUser[m.user] = m; });
+      // the members tested, in the best order; anyone not ticked to play keeps to the end
+      G[gi] = r.ids.map(function (x) { return byUser[x]; }).filter(Boolean).concat(g.filter(function (m) { return r.ids.indexOf(m.user) < 0; }));
+      sqgWrite(G);
+    });
   }
   /* ---- Beat this group (1.18.0): gbBeat on the whole squad (everyone ticked to play,
      whatever group they are in) against the enemy group picked above. The answer is
      kept for that enemy group and roster only. */
   var SQ_B = { busy: false, msg: '', res: null, key: '', at: 0, n: 0 };
   function sqbKey() { var f = sqvFoe(); return f ? sqgKey(f) + '|' + SQ_ROS.key : ''; }
-  function sqbRun() {
-    if (SQ_B.busy) return;
+  // Players left to aim for (1.19.0, owner): per view, kept on this device.
+  var SQB_KEEPS = [0.5, 1, 1.5, 2, 2.5, 3, 4, 5];
+  function sqbKeep(m) { var v = SQV.keep && +SQV.keep[m]; return v > 0 ? v : GB_PLANS[m].keep; }
+  function sqbTargets(only) { var o = {}; ['safe', 'risky'].forEach(function (m) { if (!only || only === m) o[m] = { p: GB_PLANS[m].p, keep: sqbKeep(m) }; }); return o; }
+  function sqbRun(part) {
+    if (SQ_B.busy || SQ_O.busy) return;
     var foe = sqvFoe(), ros = sqgRoster(), pool = ros.filter(sqgPlays).map(sqgOwnMember);
     if (!foe) return;
     var E = sqgFoeTeam(foe);
     if (!E.length || !pool.length) { SQ_B.msg = !pool.length ? t('Nobody is ticked to play.') : t('None of their members has a build yet.'); sqbRedraw(); return; }
-    var job = { kind: 'gbb', pool: pool, foe: E, opt: { want: GB_WANT } }, key = sqbKey();
-    SQ_B.busy = true; SQ_B.res = null; SQ_B.msg = t('Working: the answer takes 10 to 45 seconds.'); sqvPanelsRedraw();  sqbRedraw();
+    var key = sqbKey(), old = SQ_B.res && SQ_B.key === key && SQ_B.res.plans ? SQ_B.res : null;
+    if (part && !old) part = null;   // nothing to build on: the whole search
+    var opt = { simsFinal: sqvSims(), plans: sqbTargets(part), steps: part ? old.steps : undefined }, X = gbWorkers(pool, E) || gbLocal(pool, E);
+    SQ_B.busy = true; SQ_B.part = part || null; SQ_B.X = X; if (!part) SQ_B.res = null;
+    SQ_B.msg = (X.n > 1 ? (part ? t('Working: up to 3 minutes, on {0} threads.', [X.n]) : t('Working: up to 5 minutes, on {0} threads.', [X.n])) : (part ? t('Working: up to 3 minutes, on 1 thread.') : t('Working: up to 5 minutes, on 1 thread.'))); sqvPanelsRedraw(); sqbRedraw();
     var done = function (res, err) {
-      SQ_B.busy = false;
+      X.close(); SQ_B.X = null;
+      SQ_B.busy = false; SQ_B.part = null;
       if (err || !res) SQ_B.msg = t('The search failed: {0}', [String(err || 'no answer')]);
+      else if (part) { old.plans[part] = res.plans[part]; old.plans[part].partial = res.partial; old.plans[part].stopped = res.stopped; SQ_B.msg = ''; }
       else { SQ_B.res = res; SQ_B.key = key; SQ_B.at = Date.now(); SQ_B.msg = ''; SQ_B.n = pool.length; }
       sqvPanelsRedraw(); sqbRedraw();
     };
-    var w = wkRun(job, function (m) {
-      if (m.type === 'prog') { SQ_B.msg = m.t; var el = root.querySelector('#sqbmsg'); if (el) el.textContent = m.t; }
-      else if (m.type === 'gbb') done(m.res, null);
-      else if (m.type === 'error') done(null, m.err);
-    });
-    if (!w) setTimeout(function () { try { done(gbBeat(job.pool, job.foe, job.opt, null), null); } catch (e) { done(null, e.message); } }, 30);
+    var prog = function (m) { if (X.stop) return; SQ_B.msg = m; var el = root.querySelector('#sqbmsg'); if (el) el.textContent = m; };
+    setTimeout(function () {
+      gbBeat(pool, E, opt, prog, X).then(function (res) { done(res, null); }, function (e) { done(null, (e && e.message) || e); });
+    }, 30);
   }
   // Where each member is now (in the groups shown, edited or not): 1-3, or none = bench.
   function sqbWhere() { var o = {}; sqgMyGroups().forEach(function (g, j) { g.forEach(function (m) { o[m.user] = j + 1; }); }); return o; }
+  // Safe or Risky (1.19.0): the line-up shown, switched in place; both come from one search.
+  function sqbMode() { return SQV.risk ? 'risky' : 'safe'; }
+  function sqbPlan(r) { return r.plans ? r.plans[sqbMode()] : { ids: r.ids, duo: r.duo, pick: r.pick, target: { p: r.want, keep: 0 }, met: r.steps[r.pick].p >= r.want }; }
   function sqbText(r, foe) {
-    var lines = [t('To beat {0} (PvP Build Planner, {1}):', [sqgFoeName(foe), new Date(SQ_B.at).toLocaleDateString()])];
-    lines.push(r.ids.map(function (u, k) { return (k + 1) + '. ' + u; }).join('  '));
-    lines.push(t('{0}% (attacking {1}%, defending {2}%)', [sqgShow(r.duo.p), sqgShow(r.duo.pA), sqgShow(r.duo.pD)]));
+    var P = sqbPlan(r), lines = [t('To beat {0} (PvP Build Planner, {1}, {2}):', [sqgFoeName(foe), new Date(SQ_B.at).toLocaleDateString(), sqbMode() === 'risky' ? t('risky') : t('safe')])];
+    lines.push(P.ids.map(function (u, k) { return (k + 1) + '. ' + u; }).join('  '));
+    lines.push(t('{0}% (attacking {1}%, defending {2}%), {3} of ours still standing on average', [sqgShow(P.duo.p), sqgShow(P.duo.pA), sqgShow(P.duo.pD), sqvNum(P.duo.keep)]));
     return lines.join('\n');
   }
   function sqbPanel() {
-    var foe = sqvFoe(), h = '<div class="card ar" id="sqbeat"><div class="arh">' + esc(t('Beat this group')) + '</div>';
+    var foe = sqvFoe(), mode = sqbMode();
     var r = SQ_B.res && SQ_B.key === sqbKey() ? SQ_B.res : null;
-    if (!r || SQ_B.busy) {
+    var seg = r && r.plans ? '<span class="seg">' + ['safe', 'risky'].map(function (m) {
+      var T = r.plans[m].target;
+      return '<button type="button" data-risk="' + m + '" class="' + (m === mode ? 'on' : '') + '" title="' + esc(t('wins {0}%+ with {1} of yours still standing', [Math.round(T.p * 100), T.keep])) + '">' + esc(m === 'safe' ? t('Safe') : t('Risky')) + '</button>';
+    }).join('') + '</span>' : '';
+    var h = '<div class="card ar" id="sqbeat"><div class="sqbh"><div class="arh">' + esc(t('Beat this group')) + '</div>' + seg + '</div>';
+    if (!r || (SQ_B.busy && !SQ_B.part)) {
       if (!SQ_B.msg) return '<div id="sqbeat"></div>';
-      return h + '<div class="line" id="sqbmsg">' + esc(SQ_B.msg) + '</div></div>';
+      return h + '<div class="line" id="sqbmsg">' + esc(SQ_B.msg) + '</div>' + (SQ_B.busy ? sqStopBtn('b_sqbstop') : '') + '</div>';
     }
-    var where = sqbWhere(), gi = SQV.g || 1, d = r.duo, reach = r.steps[r.pick].p >= r.want, cls = function (p) { return p >= 0.6 ? 'good' : (p <= 0.4 ? 'bad' : ''); };
-    h += '<div class="arn">' + esc(t('Against {0}: send these {1}, in this order', [sqgFoeName(foe), r.ids.length])) + '</div>';
-    h += '<div class="sqblist">' + r.ids.map(function (u, k) {
+    var P = sqbPlan(r), T = P.target, where = sqbWhere(), gi = SQV.g || 1, d = P.duo, cls = function (p) { return p >= 0.6 ? 'good' : (p <= 0.4 ? 'bad' : ''); };
+    var kv = sqbKeep(mode), ks = '<select class="sqkeep" data-keep="' + mode + '"' + (SQ_B.busy ? ' disabled' : '') + ' title="' + esc(t('Players left to aim for')) + '">' +
+      SQB_KEEPS.map(function (v) { return '<option value="' + v + '"' + (v === kv ? ' selected' : '') + '>' + v + '</option>'; }).join('') + '</select>';
+    h += '<div class="line mu">' + esc(mode === 'risky' ? t('Risky: wins {0}%+ with', [Math.round(T.p * 100)]) : t('Safe: wins {0}%+ with', [Math.round(T.p * 100)])) + ' ' + ks + ' ' +
+      esc(mode === 'risky' ? t('of yours still standing. Leaves more members for your other groups.') : t('of yours still standing, room for bad luck.')) + '</div>';
+    if (SQ_B.busy && SQ_B.part === mode) return h + '<div class="line" id="sqbmsg">' + esc(SQ_B.msg) + '</div>' + sqStopBtn('b_sqbstop') + '</div>';
+    h += '<div class="arn">' + esc(t('Send these {0}, in this order', [P.ids.length])) + '</div>';
+    if (!P.met) h += line(t('No group of up to {0} meets this: this is the best found.', [r.steps[r.steps.length - 1].n]), 'warn');
+    h += '<div class="sqblist">' + P.ids.map(function (u, k) {
       var w = where[u];
       return '<div class="sqrow"><span class="sqnm"><b>' + (k + 1) + '. ' + esc(u) + '</b> <span class="mu">' + esc(w === gi ? t('(in group {0})', [w]) : (w ? t('from group {0}', [w]) : t('bench'))) + '</span></span>' +
         (d.kM[k] !== undefined ? sqvBeats(d.kM[k]) : '') + '</div>';
     }).join('') + '</div>';
     h += '<div class="arcmp arduo"><div><span>' + esc(t('We attack them')) + '</span><b class="' + cls(d.pA) + '">' + sqgShow(d.pA) + '%</b></div>' +
-      '<div><span>' + esc(t('They attack us')) + '</span><b class="' + cls(d.pD) + '">' + sqgShow(d.pD) + '%</b></div></div>';
-    h += line(t('Average {0}% ±{1}. On average you lose {2} of {3} members, they lose {4} of {5}.', [sqgShow(d.p), Math.max(1, Math.round(d.se * 200)), sqvNum(d.lostM), r.ids.length, sqvNum(d.lostE), d.kE.length]), 'mu');
-    if (!reach) h += line(t('No group of up to {0} reaches {1}%: this is the best found. They are stronger than any line-up you can send now.', [r.steps[r.steps.length - 1].n, Math.round(r.want * 100)]), 'warn');
-    else if (r.pick < r.steps.length - 1) h += line(t('The smallest group that wins at least {0}% of the time. More members raise it a little (see below) but leave fewer for your other groups.', [Math.round(r.want * 100)]), 'mu');
+      '<div><span>' + esc(t('They attack us')) + '</span><b class="' + cls(d.pD) + '">' + sqgShow(d.pD) + '%</b></div>' +
+      '<div><span>' + esc(t('Still standing')) + '</span><b class="' + (d.keep >= T.keep ? 'good' : 'bad') + '">' + sqvNum(d.keep) + '</b><em>' + esc(t('of {0}', [P.ids.length])) + '</em></div></div>';
     var cur = (sqgMyGroups()[gi - 1] || []).map(function (m) { return m.user; });
-    var taken = r.ids.filter(function (u) { return where[u] && where[u] !== gi; }), dropped = cur.filter(function (u) { return r.ids.indexOf(u) < 0; });
+    var taken = P.ids.filter(function (u) { return where[u] && where[u] !== gi; }), dropped = cur.filter(function (u) { return P.ids.indexOf(u) < 0; });
     if (taken.length) h += line(t('Taken from your other groups: {0}.', [taken.map(function (u) { return u + ' (G' + where[u] + ')'; }).join(', ')]), 'warn');
     if (dropped.length) h += line(t('Out of group {0}: {1}.', [gi, dropped.join(', ')]), 'mu');
-    h += sect(t('Chance by number of members (best group of each size)'));
-    h += '<div class="chips">' + r.steps.map(function (s, k) { return sqgChip(t('{0} members', [s.n]), sqgShow(s.p) + '%', k === r.pick ? 'good' : ''); }).join('') + '</div>';
-    if (r.steps.length < SQ_B.n && r.steps[r.steps.length - 1].p >= 0.97) h += line(t('Larger groups were not tried: already sure to win.'), 'mu');
-    h += line(t('Each size: 200 fights, quick order. The suggested group: {0} fights in its best order, half attacking and half defending.', [grp(d.n)]), 'mu');
-    if (r.partial) h += line(t('Big search: stopped after {0} seconds, so this is the best found so far.', [r.secs]), 'warn');
+    var pk = r.plans ? { safe: r.plans.safe.ids.length, risky: r.plans.risky.ids.length } : {};
+    h += '<details class="more" data-fold="bcurve"' + (SQ_OPEN.bcurve ? ' open' : '') + '><summary>' + esc(t('Chance by group size')) + '</summary>' +
+      '<div class="chips">' + r.steps.map(function (s) {
+        var tag = (s.n === pk.safe ? ' · ' + t('safe') : '') + (s.n === pk.risky ? ' · ' + t('risky') : '');
+        return sqgChip(t('{0} members', [s.n]), sqgShow(s.p) + '% · ' + t('{0} left', [sqvNum(s.keep || 0)]) + tag, s.n === P.ids.length ? 'good' : '');
+      }).join('') + '</div>' +
+      line(t('Each size: 1,000 fights, quick order. The line-up shown: its best order ({0} orders tried) and {1} fights, half attacking and half defending.', [grp(P.evals || 0), grp(d.n)]), 'mu') + '</details>';
+    var F = P.stopped !== undefined ? P : r;   // a re-planned view keeps its own flags (1.20.1)
+    if (F.stopped) h += line(t('Stopped early: this is the best found so far.'), 'warn');
+    else if (F.partial) h += line(t('Big search: stopped after {0} seconds, so this is the best found so far.', [r.secs]), 'warn');
     h += '<div class="btns"><button class="pri" id="b_sqbuse">' + esc(t('Put them in group {0}', [gi])) + '</button><button class="sec" id="b_sqbcopy">' + esc(t('Copy for chat')) + '</button></div>';
     h += line(t('This only changes the groups here, to test them. Set them in the game yourself.'), 'mu');
     h += '<textarea id="sqbtxt" readonly style="position:absolute;left:-9999px;top:0;width:10px;height:10px">' + esc(sqbText(r, foe)) + '</textarea>';
@@ -4649,12 +5053,23 @@
   function sqbWire() {
     var u = root.querySelector('#b_sqbuse');
     if (u) u.addEventListener('click', function () {
-      var r = SQ_B.res, gi = (SQV.g || 1) - 1, byUser = {};
+      var r = sqbPlan(SQ_B.res), gi = (SQV.g || 1) - 1, byUser = {};
       sqgRoster().forEach(function (m) { byUser[m.user] = m; });
       var G = sqgMyGroups().map(function (g) { return g.filter(function (m) { return r.ids.indexOf(m.user) < 0; }); });
       G[gi] = r.ids.map(function (x) { return byUser[x]; }).filter(Boolean);
       sqgWrite(G);
     });
+    root.querySelectorAll('#sqbeat button[data-risk]').forEach(function (b) {
+      b.addEventListener('click', function () { SQV.risk = b.getAttribute('data-risk') === 'risky'; sqvSave(); sqbRedraw(); });
+    });
+    sqStopWire('b_sqbstop', SQ_B, 'sqbmsg');
+    var ks = root.querySelector('#sqbeat select[data-keep]');
+    if (ks) ks.addEventListener('change', function () {
+      var m = ks.getAttribute('data-keep');
+      SQV.keep = Object.assign({}, SQV.keep || {}); SQV.keep[m] = +ks.value; sqvSave();
+      sqbRun(m);
+    });
+    var fd = root.querySelector('#sqbeat details[data-fold]'); if (fd) fd.addEventListener('toggle', function () { SQ_OPEN.bcurve = fd.open; });
     var cp = root.querySelector('#b_sqbcopy');
     if (cp) cp.addEventListener('click', function () {
       var ta = root.querySelector('#sqbtxt'); ta.select();
@@ -4720,7 +5135,8 @@
     sqgRoster().forEach(function (m) { byUser[m.user] = m; });
     function without(G, u) { return G.map(function (g) { return g.filter(function (m) { return m.user !== u; }); }); }
     var rt = box.querySelector('#b_sqretest'); if (rt) rt.addEventListener('click', function () { SQ_D.nonce++; sqvPanelsRedraw(); });
-    var bb = box.querySelector('#b_sqbeat'); if (bb) bb.addEventListener('click', sqbRun);
+    var bb = box.querySelector('#b_sqbeat'); if (bb) bb.addEventListener('click', function () { sqbRun(); });
+    var bo = box.querySelector('#b_sqord'); if (bo) bo.addEventListener('click', sqoRun);
     // my group, edited in place
     box.querySelectorAll('button[data-mv]').forEach(function (c) {
       c.addEventListener('click', function () {
@@ -4760,7 +5176,7 @@
       '<label class="foe"><b>' + esc(t('Enemy group')) + '</b><input type="search" id="f_sqq" value="' + esc(SQV.q || '') + '" placeholder="' + esc(t('search squadron or member')) + '"><span id="sqfoe">' + sqvFoeSelect() + '</span></label>' +
       '<label><b>' + esc(t('Simulations')) + '</b><select id="f_sqsims">' + SQ_SIMSL.map(function (n) { return '<option value="' + n + '"' + (n === sims ? ' selected' : '') + '>' + grp(n) + '</option>'; }).join('') + '</select></label></div>';
     // 2. my group | the chance | the enemy group
-    h += '<div class="argrid ar1" id="sqpan">' + sqvPanels() + '</div>' + sqbPanel();
+    h += '<div class="argrid ar1" id="sqpan">' + sqvPanels() + '</div>' + sqoPanel() + sqbPanel();
     // 3. best groups | zones
     var foes = sqgFoeGroups(), chosen = sqgChosen().map(sqgKey), b = '<div class="card ar"><div class="arh">' + esc(t('Best groups')) + '</div>';
     b += line(t('Tick up to 3 enemy groups: the planner splits your members into groups and orders them to beat those.'), 'mu');
@@ -4835,6 +5251,7 @@
     function without(G, u) { return G.map(function (g) { return g.filter(function (m) { return m.user !== u; }); }); }
     sqvWire(el.querySelector('#sqpan'));
     sqbWire();
+    sqoWire();
     wireZones();
     el.querySelectorAll('input[data-play]').forEach(function (c) {
       c.addEventListener('change', function () { var u = c.getAttribute('data-play'), m = ros.filter(function (x) { return x.user === u; })[0]; if (c.checked === m.active) delete SQG.off[u]; else SQG.off[u] = !c.checked; sqgSave(); SQ_OPEN.ros = true; renderSq(); });
@@ -5717,6 +6134,7 @@
     '.scrolly{max-height:68vh;overflow:auto}.scrolly thead th{position:sticky;top:0;background:var(--card);z-index:1}.plbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.plbar select,.plbar input{max-width:200px}',
     '.tabp>*+*{margin-top:14px}details.more>summary{cursor:pointer;font-weight:600;font-size:14px;color:var(--tx)}details.more[open]>summary{margin-bottom:10px}details.more:not(.box){margin-top:12px}.vsrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.vsrow b{font-size:15px}.vsrow select{flex:1 1 260px;max-width:460px;font-size:14px;min-height:38px}' +
     '.arsel{display:grid;grid-template-columns:1fr 2fr auto;gap:12px;align-items:end}.arsel label{display:flex;flex-direction:column;gap:4px}.arsel select,.arsel input{font-size:14px;min-height:36px;width:100%}.arsel .foe input{margin-bottom:4px}' +
+    '.sqbh{display:flex;justify-content:space-between;align-items:center;gap:8px}.seg{display:inline-flex;border:1px solid var(--bd,#3333);border-radius:999px;overflow:hidden}.seg button{border:0;border-radius:0;margin:0;padding:3px 12px;background:transparent;color:inherit;font-size:12px;cursor:pointer;opacity:.7}.seg button.on{background:#3b82f633;font-weight:700;opacity:1}.sqkeep{width:auto;display:inline-block;padding:1px 4px;margin:0 2px;font-size:12px}' +
     '.argrid{display:grid;gap:12px;margin-top:12px}.argrid.ar1{grid-template-columns:1fr 1fr 1fr}.argrid.ar2{grid-template-columns:1fr 1fr}.card.ar{padding:12px}.arh{font-size:12px;text-transform:uppercase;letter-spacing:.06em;opacity:.7;margin-bottom:6px}.arn{font-weight:700;font-size:15px;margin-bottom:6px}.arbig{font-size:44px;font-weight:800;line-height:1.1;margin:6px 0}.card.ar.mid{text-align:center}.arcmp{display:flex;gap:10px;justify-content:center;margin:8px 0}.arcmp>div{flex:1;max-width:150px;border:1px solid var(--bd,#3333);border-radius:8px;padding:6px}.arcmp span{display:block;font-size:11px;opacity:.7}.arcmp b{font-size:20px}.arcmp em{display:block;font-size:11px;font-style:normal;opacity:.75}.argear span{display:block;font-size:12px;opacity:.85}' +
     '.sqrow{display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--bd)}.sqrow.off{opacity:.55}.sqnm{flex:1 1 auto;min-width:0;overflow:hidden}.sqnm b{white-space:nowrap}.sqst{display:block;font-size:11px}.sqbw{flex:0 0 72px;height:7px;background:rgba(127,127,127,.22);border-radius:4px;overflow:hidden}.sqbar{display:block;height:100%;background:var(--ac);border-radius:4px}.sqbeat{font-size:11px;white-space:nowrap}.sqmv{padding:0 7px;min-height:26px;line-height:1}#f_sqadd{width:100%;margin-top:8px;min-height:34px}.arduo b{font-size:34px}.sqrelay{text-align:left;margin:8px 0}table.zt tr.zcan{cursor:pointer}table.zt tr.zcan:hover td{background:var(--tile)}table.zt tr.zcur td{font-weight:700}' +
     '@media (max-width:900px){.arsel{grid-template-columns:1fr}.argrid.ar1,.argrid.ar2{grid-template-columns:1fr}}',
