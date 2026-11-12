@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PvP Build Planner (beta)</title>
-<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.15.0">
+<meta name="description" content="Fan-made PvP build planner for Stellar Odyssey, v1.16.0">
 </head>
 <body>
 <script>
 (function () {
   'use strict';
-  var PAGE_VER = "1.15.0";
+  var PAGE_VER = "1.16.0";
   var GRAB_SRC = "(function () {\nif (window.__sopvpGrab) { window.__sopvpGrab.show(); return; }\nvar PL = 'https://johnnyboyqc.github.io/stellar-odyssey-pvp-planner/', OR = 'https://johnnyboyqc.github.io';\nvar G = { squad: {}, roster: null, duels: {}, list: {}, box: null };\nvar RE = /\\/api\\/(squadrons\\/(battlelog|groups)|battlefield\\/arenaduels)(\\?|$)/;\nfunction abs(u) { try { return new URL(String((u && u.href) || u), location.href).href; } catch (e) { return String(u); } }\nfunction take(url, text) {\nvar b;\ntry { b = JSON.parse(text); } catch (e) { return; }\nif (/battlelog/.test(url)) (b && b.battles || []).forEach(function (x) { if (x && x._id && Array.isArray(x.logs)) G.squad[x._id] = x; });\nelse if (/arenaduels/.test(url)) (b && b.results || []).forEach(function (x) { if (x && x._id && x.attackerName && x.defenderName) G.list[x._id] = x; });\nelse G.roster = { t: Date.now(), body: text };\ndraw();\n}\nvar XP = XMLHttpRequest.prototype, oO = XP.open, oS = XP.send;\nXP.open = function (m, u) { try { this.__sopvpG = abs(u); } catch (e) {} return oO.apply(this, arguments); };\nXP.send = function () {\nvar x = this;\ntry {\nif (RE.test(x.__sopvpG || '')) x.addEventListener('load', function () {\ntry {\nif (x.status < 200 || x.status >= 300) return;\nvar t = (x.responseType === '' || x.responseType === 'text') ? x.responseText : (x.responseType === 'json' ? JSON.stringify(x.response) : null);\nif (t) take(x.responseURL || x.__sopvpG, t);\n} catch (e) {}\n});\n} catch (e) {}\nreturn oS.apply(this, arguments);\n};\nvar oF = window.fetch;\nif (typeof oF === 'function') window.fetch = function (i) {\nvar p = oF.apply(this, arguments);\ntry {\nvar u = abs(typeof i === 'string' ? i : (i && i.url));\nif (RE.test(u)) p.then(function (r) { if (r.ok) r.clone().text().then(function (t) { take(r.url || u, t); }, function () {}); }, function () {});\n} catch (e) {}\nreturn p;\n};\nfunction state() {\ntry {\nvar el = document.querySelector('#q-app') || document.querySelector('#app'), a = el && el.__vue_app__;\nvar p = a && a.config && a.config.globalProperties && a.config.globalProperties.$pinia;\nreturn p && p.state && p.state.value;\n} catch (e) { return null; }\n}\nfunction copy(o) { try { return JSON.parse(JSON.stringify(o)); } catch (e) { return null; } }\nfunction tick() {\nvar st = state();\nif (!st) return;\ntry {\nvar A = st.PvPArenaStore, d = A && A.currentDuel;\nif (d && d._id && d.logs && d.logs.length && !G.duels[d._id]) { G.duels[d._id] = copy(d); draw(); }\nvar s = st.squadronStore;\nif (!G.roster && s && s.group1 && s.group1.length) { G.roster = { t: Date.now(), body: JSON.stringify({ squad: [{ group1: copy(s.group1), group2: copy(s.group2 || []), group3: copy(s.group3 || []), available: [] }] }) }; draw(); }\n} catch (e) {}\n}\nsetInterval(tick, 1000);\n// The squadron's member list: the game page always holds it (names only).\nfunction sqNames(st) {\ntry {\nvar q = st.UserStore.squadron;\nif (!q || !Array.isArray(q.members) || !q.members.length) return [];\nreturn [{ t: Date.now(), sq: String(q.name || ''), names: q.members.map(function (m) { return m && m.username ? String(m.username) : null; }).filter(Boolean).slice(0, 300) }];\n} catch (e) { return []; }\n}\n// Squadron Groups as the page shows it right now (every member's PvP\n// points, gear and clones), once that tab has been opened. Members who are\n// in no group come from the game's last answer (lastBody), which lists them.\nfunction sqLive(st, lastBody) {\ntry {\nvar s = st.squadronStore;\nif (!s || !Array.isArray(s.group1)) return null;\nvar gs = [s.group1, s.group2 || [], s.group3 || []], n = 0, inG = {};\ngs.forEach(function (g) { g.forEach(function (m) { if (m && m.username && m.pvpstats) { n++; inG[m.username] = 1; } }); });\nif (!n) return null;\nvar av = Array.isArray(s.available) ? s.available : null;\nif (!av && lastBody) { try { var b = JSON.parse(lastBody), q = Array.isArray(b.squad) ? b.squad[0] : b; av = (q.available || []).filter(function (m) { return m && m.username && !inG[m.username]; }); } catch (e) { av = null; } }\nreturn { t: Date.now(), body: JSON.stringify({ squad: [{ group1: gs[0], group2: gs[1], group3: gs[2], available: av || [] }] }) };\n} catch (e) { return null; }\n}\nfunction build(st) {\ntry {\nvar U = st.UserStore, P = U.player, mats = {};\n(P.pvp_gear || []).forEach(function (g) { mats[String(g.statCost || '').toLowerCase()] = 1; });\nvar slots = (st.PetsStore && st.PetsStore.petSlots) || [], inSlot = {};\nslots.forEach(function (x) { if (x && x.pet) inSlot[x.pet] = 1; });\nreturn {\nUserStore: { username: U.username, pvp_badges: U.pvp_badges, player: copy({ pvp_gear: P.pvp_gear, pvpstats: P.pvpstats, clones: P.clones }) },\nCraftStore: { crafting_level: st.CraftStore && st.CraftStore.crafting_level },\nMaterialsStore: { materialsList: ((st.MaterialsStore && st.MaterialsStore.materialsList) || []).filter(function (m) { var n = m && m.item && (m.item.name || m.item); return n && mats[String(n).toLowerCase()]; }).map(function (m) { return { item: { name: m.item.name || m.item }, quantity: m.quantity }; }) },\nPetsStore: { petSlots: slots.filter(function (x) { return x && x.pet; }).map(function (x) { return { pet: x.pet }; }), pets: ((st.PetsStore && st.PetsStore.pets) || []).filter(function (p) { return p && inSlot[p._id] && p.name === 'Velari'; }).map(function (p) { return { _id: p._id, name: p.name, level: p.level }; }) }\n};\n} catch (e) { return null; }\n}\nfunction payload() {\nvar st = state();\nreturn { app: 'PvP Planner button', v: 1, made: Date.now(), me: st && st.UserStore ? st.UserStore.username : null, build: st ? build(st) : null,\nsquad: Object.keys(G.squad).map(function (k) { return { battle: G.squad[k] }; }),\nduel: Object.keys(G.duels).map(function (k) { return { duel: G.duels[k], saved: Date.now() }; }),\nduelList: Object.keys(G.list).map(function (k) { return { row: G.list[k] }; }),\nroster: (G.roster ? [G.roster] : []).concat(st && sqLive(st, G.roster && G.roster.body) ? [sqLive(st, G.roster && G.roster.body)] : []),\nmembers: st ? sqNames(st) : [] };\n}\nfunction send() {\nvar nonce = String(Math.random()).slice(2), w = window.open(PL + '#wait=' + nonce, '_blank');\nif (!w) { alert(L.p); return; }\nwindow.addEventListener('message', function on(e) {\nif (e.origin !== OR || !e.data || e.data.sopvpReady !== nonce || e.source !== w) return;\nwindow.removeEventListener('message', on);\ne.source.postMessage({ sopvpRaw: payload(), nonce: nonce }, OR);\n});\n}\nvar L = (function () {\nvar n = String((navigator.languages && navigator.languages[0]) || navigator.language || 'en').toLowerCase();\nvar T = {\nes: { m: 'miembros del escuadrón', b: 'batallas de escuadrón', d: 'duelos de arena abiertos', l: 'en la lista de arena', r: 'plantilla', y: 'sí', n: 'todavía no', h: 'Ahora recorre Registro de peleas › Escuadrón (50 por página, todas las páginas), abre Registro de peleas › Arena y abre Grupos de escuadrón. Ver pelea solo hace falta para rivales nunca vistos en una batalla de escuadrón. Deja esta pestaña abierta.', s: 'Enviar al planificador ↗', p: 'El navegador bloqueó la pestaña nueva: permite las ventanas emergentes de este sitio y vuelve a pulsar Enviar.' },\nzh: { m: '名舰队成员', b: '场舰队战斗', d: '场已打开的竞技场决斗', l: '条竞技场列表记录', r: '名单', y: '已有', n: '还没有', h: '现在浏览 战斗日志 › 舰队（每页 50 条，每一页都看），打开 战斗日志 › 竞技场，再打开舰队编组。只有从未在舰队战斗中见过的对手才需要点击查看战斗。请保持此标签页打开。', s: '发送到规划器 ↗', p: '浏览器拦截了新标签页：请允许本网站弹出窗口后再点一次发送。' },\nen: { m: 'squadron members', b: 'squadron battles', d: 'arena duels opened', l: 'in the Arena list', r: 'roster', y: 'yes', n: 'not yet', h: 'Now browse Battle Log › Squadron (50 per page, every page), open Battle Log › Arena, and open Squadron Groups. View battle is only needed for opponents never seen in a squadron battle. Keep this tab open.', s: 'Send to planner ↗', p: 'The browser blocked the new tab: allow pop-ups for this site, then click Send again.' }\n};\nreturn T[n.indexOf('es') === 0 ? 'es' : (n.indexOf('zh') === 0 ? 'zh' : 'en')];\n})();\nfunction draw() {\nif (!G.box) return;\nvar n = Object.keys(G.squad).length, d = Object.keys(G.duels).length, l = Object.keys(G.list).length;\nG.box.querySelector('.c').textContent = n + ' ' + L.b + ', ' + l + ' ' + L.l + ', ' + d + ' ' + L.d + ', ' + L.r + ': ' + (G.roster || (state() && sqLive(state(), null)) ? L.y : L.n) + (function () { var st = state(), m = st ? sqNames(st) : []; return m.length ? ', ' + m[0].names.length + ' ' + L.m : ''; })();\n}\nfunction show() {\nif (G.box) { G.box.style.display = 'block'; return; }\nvar b = document.createElement('div');\nb.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;background:#1a2129;color:#d5dde6;border:1px solid #4fb3e8;border-radius:10px;padding:10px 12px;font:13px sans-serif;max-width:300px;box-shadow:0 4px 16px rgba(0,0,0,.4)';\nb.innerHTML = '<b>PvP Planner<\/b> <span style=\"float:right;cursor:pointer\" class=\"x\">✕<\/span><div class=\"c\" style=\"margin:6px 0\"><\/div>' +\n'<div class=\"h\" style=\"font-size:11px;color:#9aa8b6;margin-bottom:8px\"><\/div>' +\n'<button class=\"s\" style=\"background:#4fb3e8;color:#0d1b24;border:0;border-radius:7px;padding:6px 12px;font-weight:600;cursor:pointer\"><\/button>';\nb.querySelector('.s').textContent = L.s;\nb.querySelector('.h').textContent = L.h;\nb.querySelector('.x').onclick = function () { b.style.display = 'none'; };\nb.querySelector('.s').onclick = send;\ndocument.body.appendChild(b);\nG.box = b; draw();\n}\nwindow.__sopvpGrab = { show: show, data: G };\ntick(); show();\n})();";
 
   /* ============================================================
@@ -598,6 +598,11 @@
       'Every fight here always goes the same way: no change of build alters it.': 'Aquí cada pelea acaba siempre igual: ningún cambio de build lo altera.',
       '{0}% → {1}% with free changes (points, gear stats, skills). Green: what to change.': '{0}% → {1}% con cambios gratis (puntos, stats del equipo, habilidades). Verde: lo que hay que cambiar.',
       'Reach a win %': 'Alcanzar un % de victoria',
+      "{0} if they are stronger": "{0} si es más fuerte",
+      "them": "ellos",
+      "This fight is already won as things stand. If {0} is stronger than we think (damage and HP {1}), your build wins {2}% and the one below {3}%: it keeps the win safest.": "Este combate ya está ganado tal como están las cosas. Si {0} es más fuerte de lo que creemos (daño y HP {1}), tu build gana el {2}% y la de abajo el {3}%: es la que asegura más la victoria.",
+      "This fight is already lost as things stand. Against a weaker {0} (damage and HP {1}), your build wins {2}% and the one below {3}%: it gives you the best chance.": "Este combate ya está perdido tal como están las cosas. Contra un {0} más débil (daño y HP {1}), tu build gana el {2}% y la de abajo el {3}%: es la que te da más opciones.",
+      "Green: what to change.": "En verde: lo que hay que cambiar.",
       "(guess)": "(estimación)",
       "guess, from {0}": "estimación, de {0}",
       "Guess: since then, {0}.": "Estimación: desde entonces, {0}.",
@@ -1184,6 +1189,11 @@
       'Every fight here always goes the same way: no change of build alters it.': '这里每场战斗结果都相同：改配置也无法改变。',
       '{0}% → {1}% with free changes (points, gear stats, skills). Green: what to change.': '{0}% → {1}%，只需免费调整（点数、装备属性、技能）。绿色：需要更改的项。',
       'Reach a win %': '达到目标胜率',
+      "{0} if they are stronger": "{0}（若对手更强）",
+      "them": "对手",
+      "This fight is already won as things stand. If {0} is stronger than we think (damage and HP {1}), your build wins {2}% and the one below {3}%: it keeps the win safest.": "按目前情况，这场战斗已经稳赢。如果 {0} 比我们估计的更强（伤害和生命 {1}），你的配置胜率 {2}%，下面的配置 {3}%：它最能保住胜利。",
+      "This fight is already lost as things stand. Against a weaker {0} (damage and HP {1}), your build wins {2}% and the one below {3}%: it gives you the best chance.": "按目前情况，这场战斗必输。面对较弱的 {0}（伤害和生命 {1}），你的配置胜率 {2}%，下面的配置 {3}%：它给你最大的机会。",
+      "Green: what to change.": "绿色：需要更改的地方。",
       "(guess)": "（推测）",
       "guess, from {0}": "推测，来自 {0}",
       "Guess: since then, {0}.": "推测：此后，{0}。",
@@ -1324,7 +1334,7 @@
   }
   function WK_FNS() {
     return [numOr, btRng, arAssume, arDraws, arSide, pvAllocate, pvBestAssign, pvClimb, pvKeepGear, pvCompositions, pvCopy, pvGap, pvGearBase, pvGearVal, pvLevelCost,
-      pvMetaPool, pvNeedFor, pvPlanRun, pvPool, pvPoolRef, pvReplay, pvSample, pvScore, pvScoreOf, pvSkills, pvSpend, pvTerm, pvTargetRun,
+      pvMetaPool, pvNeedFor, pvToughen, pvPlanRun, pvPool, pvPoolRef, pvReplay, pvSample, pvScore, pvScoreOf, pvSkills, pvSpend, pvTerm, pvTargetRun,
       pvTierCost, pvTotals, pvUpgradeRows, rlDuel, rlLeft, rlLoad, rlMe, rlPhase, rlSlot, rngStreams,
       sqDebuff, sqFloor, sqSide, sqEnter, sqHealth, sqLeft, sqPhase, sqFight, gbNorm, gbDraw, gbGroup, gbDuo, gbPerms, gbStr, gbOrder, gbOptimise];
   }
@@ -1492,7 +1502,8 @@
     if (se > 0 && hi > lo) h += line(t('likely between {0}% and {1}%', [lo, hi]), 'mu');
     var fr = plan.stop ? null : plan.free;
     h += '<div class="arcmp"><div><span>' + esc(t('Current build')) + '</span><b>' + p + '%</b></div>' +
-      '<div><span>' + esc(t('Best build')) + '</span><b class="' + (fr && fr.gain > Math.max(2 * fr.se, S.inputs.bestGap || 0) ? 'good' : '') + '">' + (fr ? pvPct(fr.score) + '%' : '--') + '</b>' + (fr ? '<em>' + esc(pts1(fr.gain)) + '</em>' : '') + '</div></div>';
+      '<div><span>' + esc(t('Best build')) + '</span><b class="' + (fr && fr.gain > Math.max(2 * fr.se, S.inputs.bestGap || 0) ? 'good' : '') + '">' + (fr ? pvPct(plan.tough ? fr.real : fr.score) + '%' : '--') + '</b>' +
+      (fr ? '<em>' + esc(plan.tough ? t('{0} if they are stronger', [pts1(fr.gain)]) : pts1(fr.gain)) + '</em>' : '') + '</div></div>';
     h += line(t('{0} simulated fights, half attacking, half defending · {1} rounds on average', [grp(arSims()), Math.round(plan.cur.rounds || 0)]), 'mu');
     if (plan.synthetic) h += line(t('Against made-up rivals with your total stats (no opponent picked).'), 'mu');
     arAgeWarn().forEach(function (w) { h += line('⚠ ' + w, 'warn'); });
@@ -1526,6 +1537,15 @@
     if (!plan) return h + line(t('Working out the numbers...'), 'mu') + '</div>';
     var t0 = pvTotals(pv), fr = plan.stop ? null : plan.free, bar = fr ? Math.max(2 * fr.se, S.inputs.bestGap || 0) : 0;
     if (plan.stop) return h + line(t('Every fight here always goes the same way: no change of build alters it.'), 'warn') + '</div>';
+    if (plan.tough && fr) {
+      // 1.16.0: the fight is settled, so the build was tuned against a stronger (or weaker) version of them.
+      var who = vsKind() === 'player' && VS.pl ? VS.pl : t('them'), kx = 'x' + (Math.round(plan.tough.k * 100) / 100);
+      h += line(plan.tough.k > 1
+        ? t('This fight is already won as things stand. If {0} is stronger than we think (damage and HP {1}), your build wins {2}% and the one below {3}%: it keeps the win safest.', [who, kx, Math.round(plan.tough.win * 100), Math.round(fr.win * 100)])
+        : t('This fight is already lost as things stand. Against a weaker {0} (damage and HP {1}), your build wins {2}% and the one below {3}%: it gives you the best chance.', [who, kx, Math.round(plan.tough.win * 100), Math.round(fr.win * 100)]), 'mu');
+      if (fr.gain <= bar) return h + line(t('Keep your build: the best change found is worth {0} points, inside the noise (±{1}).', [pts1(fr.gain), seTxt(fr.se)]), 'good') + '</div>';
+      return h + line(t('Green: what to change.'), 'good') + buildTables(fr.build, fr.totals, pv, t0) + '</div>';
+    }
     if (!fr || fr.gain <= bar) return h + line(t('Keep your build: the best change found is worth {0} points, inside the noise (±{1}).', [pts1(fr ? fr.gain : 0), seTxt(fr ? fr.se : 0)]), 'good') + '</div>';
     return h + line(t('{0}% → {1}% with free changes (points, gear stats, skills). Green: what to change.', [pvPct(plan.cur.score), pvPct(fr.score)]), 'good') + buildTables(fr.build, fr.totals, pv, t0) + '</div>';
   }
@@ -2148,13 +2168,14 @@
   // our own precision and evasion, so arDraws spreads the opponent by exactly
   // the doubt in the estimate. Unknown precision or evasion falls back on the
   // meta split (15% of the total next to 35% power) with very wide doubt.
+  var PX_SE = { min: 0.02 };   // the smallest doubt an estimated precision or evasion is given
   function pxRecord(card, myP, myE, k) {
     var N = card.n || 1, pow = card.d / N, hull = card.h / (7 * N);
     // No estimate at all (an old share file): the gear-based first guess (1.11.0;
     // was 15/35 of the mean of power and hull, half the real value).
     var shp = pxShape(card.d, card.h, N), G = pow + hull;
     function q(f, ref, kind) {
-      var v = f ? (f[3] ? f[3] * G : f[0]) : Math.max(20, (kind === 'p' ? shp.p : shp.e) * G), se = f ? Math.max(0.02, f[1]) : 0.6;
+      var v = f ? (f[3] ? f[3] * G : f[0]) : Math.max(20, (kind === 'p' ? shp.p : shp.e) * G), se = f ? Math.max(PX_SE.min, f[1]) : 0.6;
       var p = kind === 'p' ? v / (v + ref) : ref / (ref + v), n = Math.max(4, Math.round(1 / (se * se * p * (1 - p))));
       return [Math.round(p * n), n, v];
     }
@@ -2382,6 +2403,24 @@
     return cur;
   }
 
+  // A fight that is already settled says nothing about which build is better, since
+  // every build gets the same result. 1.16.0: rather than stop, the opponent is made
+  // stronger (or, for a fight you always lose, weaker): damage and HP times k, found
+  // so the current build wins about 60%. The build is then tuned against that
+  // version: the one that keeps the win safest if they are stronger than we think.
+  function pvToughen(pv, pool, up) {
+    var scale = function (k) { return pool.map(function (d) { return d.map(function (x) { var y = Object.assign({}, x); y.dmg = x.dmg * k; y.hp = x.hp * k; return y; }); }); };
+    var winAt = function (k) { return pvScoreOf(pv, scale(k), 400).win; };
+    var lo = 1, hi = up ? 4 : 0.25;
+    if (up ? winAt(hi) > 0.6 : winAt(hi) < 0.6) return null;   // still settled: nothing to learn
+    for (var it = 0; it < 10; it++) {
+      var mid = Math.sqrt(lo * hi), w = winAt(mid);
+      if ((w > 0.6) === up) lo = mid; else hi = mid;
+    }
+    var k = Math.sqrt(lo * hi);
+    return { k: k, pool: scale(k) };
+  }
+
   // As in Astrolabe, with the split from pvClimb instead of the formula alone.
   function pvPlanRun(pv, recs, keepBadges, done) {
     try {
@@ -2406,7 +2445,15 @@
       // contested by construction; should a build still settle them all,
       // tune on the whole field rather than stop.
       if (synthetic && idx.length < PV_CONTESTED) liveAll = pool;
-      else if (idx.length < PV_CONTESTED) { plan.stop = 1; done(plan); return; }
+      else if (idx.length < PV_CONTESTED) {
+        var tg = pvToughen(pv, pool, plan.cur.win >= 0.5);
+        if (!tg) { plan.stop = 1; done(plan); return; }
+        // From here on the search runs against the tougher version; plan.cur stays the real chance.
+        plan.tough = { k: tg.k, real: pool };
+        pool = tg.pool;
+        plan.tough.cur = pvScoreOf(pv, pool);
+        liveAll = pool;
+      }
       var live = pvSample(liveAll, PV_SEARCH_MAX);   // a sample of them: what the search runs on
       plan.searched = live.length;
 
@@ -2447,8 +2494,10 @@
       for (var i = 0; i < out.length; i++) if (out[i] === undefined) out[i] = left.shift();
       cand.gear.forEach(function (g, i) { g.skill = out[i]; });
 
-      var s = pvScoreOf(cand, pool), g = pvGap(plan.cur, s);
+      var base = plan.tough ? plan.tough.cur : plan.cur;
+      var s = pvScoreOf(cand, pool), g = pvGap(base, s);
       plan.free = { build: cand, totals: pvTotals(cand), score: s.score, win: s.win, gain: g.gain, se: g.se, sure: g.gain > 2 * g.se };
+      if (plan.tough) plan.free.real = pvScoreOf(cand, plan.tough.real).score;
 
       // What each next upgrade is worth, and what the materials and badges in hand buy right now.
       plan.base8 = pvScoreOf(pv, live, 800).score;
@@ -2458,9 +2507,10 @@
       plan.buy = { steps: sp.steps };
       if (sp.steps.length) {
         var b2 = pvCopy(pv); b2.gear = sp.gear;
-        var s2 = pvScoreOf(b2, pool), g2 = pvGap(plan.cur, s2);
+        var s2 = pvScoreOf(b2, pool), g2 = pvGap(base, s2);
         plan.buy.score = s2.score; plan.buy.gain = g2.gain; plan.buy.se = g2.se; plan.buy.build = b2;
       }
+      if (plan.tough) { plan.tough.win = plan.tough.cur.win; delete plan.tough.real; delete plan.tough.cur; }   // the plan crosses to the page: keep it small
       done(plan);
     } catch (e) { done(null, e); }
   }
