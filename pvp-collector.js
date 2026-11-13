@@ -1,14 +1,16 @@
-/* Stellar Odyssey – Astrolabe Collector 2.2.1 (bookmark version). Loaded by the bookmarklet on the game page. */
+/* Stellar Odyssey – Astrolabe Collector 2.3.0 (bookmark version). Loaded by the bookmarklet on the game page. */
 (function () {
   'use strict';
-  if (location.hostname === 'johnnyboyqc.github.io' || window.__ASTRO_SITE_TEST) { siteMode("2.2.1"); return; }
+  if (location.hostname === 'johnnyboyqc.github.io' || window.__ASTRO_SITE_TEST) { siteMode("2.3.0"); return; }
   var MARK = document.documentElement;
   if (MARK && MARK.getAttribute('data-sopvp-col')) { try { window.dispatchEvent(new CustomEvent('sopvp-col-show')); } catch (e) {} return; }
   if (MARK) MARK.setAttribute('data-sopvp-col', '1');
 
-  var COL_VER = "2.2.1";
+  var COL_VER = "2.3.0";
   /* ============================================================
-     Astrolabe Collector for Stellar Odyssey (2.2.1; it was the PvP Collector)
+     Astrolabe Collector for Stellar Odyssey (2.3.0; it was the PvP Collector)
+     2.3.0 (2026-11-13): shares only after the member signed in on Astrolabe with their game key; the page
+     hands this Collector a write-only token (col-local.js colTok). Without one nothing is sent.
 
      Keeps what the game page itself loads while you play (squadron battle
      logs, Arena duels and the Arena list, Squadron Groups, the member list,
@@ -254,7 +256,14 @@
   // logs). Players with power or hull 1.6x the other or more carry two pieces there and
   // usually no evasion piece: precision about 0.33, evasion about 0.04 of power + hull.
   // A soft mix of the two shapes; weight W pseudo-swings, lower when the shape is unclear.
-  var PX_PRIOR_W = 16;
+  // 1.23.3: 16 -> 64 pseudo-swings. Replayed on the shared store (12 Nov 2026: 239 battles, each
+  // forecast from the ones before it, 61,395 enemy swings, 134 players) the cards at 16 predicted a
+  // swing worse than the gear guess alone (log loss 0.6759 against 0.6686): a few hundred swings
+  // against a build that has since grown say less than they seem to. At 64: 0.6718 (95% range of
+  // the gain 0.0022 to 0.0063); fights: squadron as-known Brier 0.098 -> 0.098, Arena 0.115 -> 0.112
+  // (with duel records 0.132 -> 0.117). 256 did better on swings and Arena but not on every
+  // squadron check; re-test as the store grows. Weighting earlier builds by likeness: no gain.
+  var PX_PRIOR_W = 64;
   function pxGear(d, h, n) { n = n || 1; return d / n + h / (7 * n); }
   function pxShape(d, h, n) {
     n = n || 1;
@@ -964,16 +973,22 @@
   // the game page to the store (which allows the game's origin).
   function directOn() { return S.inputs.direct === true && (typeof GM_xmlhttpRequest === 'function' || DIRECT_FETCH); }
   function directSent() { var s = store.get('sent', null) || {}; ['b', 'd', 'r', 'l', 'x', 't'].forEach(function (k) { if (!s[k]) s[k] = {}; }); delete s.m; return s; }
+  // 2026-11-13 (access step 1): every upload carries the member's write-only token (Collector: col-local.js colTok,
+  // handed over by Astrolabe after the member signed in with their game key). No token: nothing is sent. A script
+  // without that part (PvP Meta) sends none, and the store refuses it.
+  function directHdr() { var h = { 'Content-Type': 'application/json', 'X-SOPVP-Client': 'pvpmeta' }; if (typeof colAuth === 'function') colAuth(h); return h; }
   function directPost(body) {
+    if (typeof colTok === 'function' && !colTok()) return Promise.reject(new Error(COL_NOTOK));
+    var gone = function (st) { if (st === 401 && typeof colTokDrop === 'function') colTokDrop(); };
     if (typeof GM_xmlhttpRequest !== 'function' && DIRECT_FETCH) {
-      return fetch(CL_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-SOPVP-Client': 'pvpmeta' }, body: JSON.stringify(body), credentials: 'omit' })
-        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+      return fetch(CL_URL, { method: 'POST', headers: directHdr(), body: JSON.stringify(body), credentials: 'omit' })
+        .then(function (r) { if (!r.ok) { gone(r.status); throw new Error('HTTP ' + r.status); } return r.json(); });
     }
     return new Promise(function (ok, no) {
       try {
         GM_xmlhttpRequest({ method: 'POST', url: CL_URL, data: JSON.stringify(body), timeout: 60000,
-          headers: { 'Content-Type': 'application/json', 'X-SOPVP-Client': 'pvpmeta' },
-          onload: function (r) { if (r.status < 200 || r.status >= 300) { no(new Error('HTTP ' + r.status)); return; } try { ok(JSON.parse(r.responseText)); } catch (e) { no(e); } },
+          headers: directHdr(),
+          onload: function (r) { if (r.status < 200 || r.status >= 300) { gone(r.status); no(new Error('HTTP ' + r.status)); return; } try { ok(JSON.parse(r.responseText)); } catch (e) { no(e); } },
           onerror: function () { no(new Error('network')); }, ontimeout: function () { no(new Error('timeout')); } });
       } catch (e) { no(e); }
     });
@@ -1092,6 +1107,8 @@
   }
   function directPush() {
     if (!directOn() || DIRECT.busy) return Promise.resolve();
+    // Not signed in (Collector): nothing to do until a token arrives (the timer below then sends at once).
+    if (typeof colTok === 'function' && !colTok()) { DIRECT.err = COL_NOTOK; DIRECT.last = Date.now(); return Promise.resolve(); }
     DIRECT.busy = true; DIRECT.dirty = false; DIRECT.last = Date.now();
     var sent = directSent();
     return directData(sent).then(function (D) {
@@ -1152,14 +1169,17 @@
           });
         }
       });
-    }).catch(function (e) { DIRECT.err = String((e && e.message) || e); DIRECT.dirty = true; })
+    // A failure is tried again after five minutes (the timer below), not at the next half-minute tick (review 2026-11-13).
+    }).catch(function (e) { DIRECT.err = String((e && e.message) || e); DIRECT.dirty = false; })
       .then(function () { DIRECT.busy = false; if (panel.style.display !== 'none' && view === 'set') render(); });
   }
   // New data: sent within half a minute; a failure is retried every five minutes.
   setInterval(function () {
     if (!directOn()) return;
     try { var u = ubState(recState() || S.storeState); if (u && !u.ub.at) DIRECT.dirty = true; } catch (e) {}   // our build changed
-    if (DIRECT.dirty || (DIRECT.err && Date.now() - DIRECT.last > 300000) || Date.now() - DIRECT.last > 900000) directPush();
+    // A sign-in just arrived (the token was missing at the last try): send now, not in five minutes.
+    var signedNow = typeof colTok === 'function' && DIRECT.err === COL_NOTOK && !!colTok();
+    if (DIRECT.dirty || signedNow || (DIRECT.err && Date.now() - DIRECT.last > 300000) || Date.now() - DIRECT.last > 900000) directPush();
   }, 30000);
   setTimeout(function () { if (directOn()) directPush(); }, 20000);
   function directRow() {
@@ -1174,7 +1194,7 @@
   }
 
   /* ============================================================
-     FROM ASTROLABE 3.22.10 (copied unchanged by the build step)
+     FROM ASTROLABE 3.22.13 (copied unchanged by the build step)
      ============================================================ */
 
   var AR_MAX = 200;
@@ -2005,15 +2025,17 @@
       return btoa(s);
     });
   }
+  // 2026-11-13: with the member's write-only token only (col-local.js colTok); none = nothing is sent.
   function stPost(body) {
+    if (!colTok()) return Promise.reject(new Error(COL_NOTOK));
     if (typeof GM_xmlhttpRequest !== 'function') {
-      return fetch(ST_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-SOPVP-Client': 'pvpmeta' }, body: JSON.stringify(body), credentials: 'omit' })
+      return fetch(ST_URL, { method: 'POST', headers: colAuth({ 'Content-Type': 'application/json', 'X-SOPVP-Client': 'pvpmeta' }), body: JSON.stringify(body), credentials: 'omit' })
         .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
     }
     return new Promise(function (ok, no) {
       try {
         GM_xmlhttpRequest({ method: 'POST', url: ST_URL, data: JSON.stringify(body), timeout: 60000,
-          headers: { 'Content-Type': 'application/json', 'X-SOPVP-Client': 'pvpmeta' },
+          headers: colAuth({ 'Content-Type': 'application/json', 'X-SOPVP-Client': 'pvpmeta' }),
           onload: function (r) { if (r.status < 200 || r.status >= 300) { no(new Error('HTTP ' + r.status)); return; } try { ok(JSON.parse(r.responseText)); } catch (e) { no(e); } },
           onerror: function () { no(new Error('network')); }, ontimeout: function () { no(new Error('timeout')); } });
       } catch (e) { no(e); }
@@ -2022,6 +2044,7 @@
   // At most one copy every 5 minutes, and only when something in it changed.
   function stTick(force) {
     if (!stOn() || ST.busy) return;
+    if (!colTok()) { ST.err = COL_NOTOK; return; }   // not signed in: nothing read, packed or sent
     var now = Date.now();
     if (!force && (now < ST.hold || now - ST.last < ST_EVERY)) return;
     var sv = recState(), u = sv && sv.UserStore;
@@ -2036,8 +2059,11 @@
       .then(function (r) { ST.busy = false; if (r && r.ok) { ST.sig = sig; ST.ok = Date.now(); ST.err = null; ST.hold = 0; } else ST.err = 'refused'; render(); })
       .catch(function (e) {
         ST.busy = false; ST.err = String((e && e.message) || e);
-        // Not let in (never signed in on the site, or Astrolabe is still closed to this account): ask again in 6 hours, not every 5 minutes.
-        if (/HTTP 40[13]/.test(ST.err)) { ST.hold = Date.now() + ST_HOLD; ST.err = 'not open to this account yet (sign in on the Astrolabe site first)'; }
+        // Not signed in: nothing was sent; it goes out once the member signs in on Astrolabe (the token clears the wait).
+        if (ST.err === COL_NOTOK) { ST.last = 0; ST.sig = ''; }
+        else if (/HTTP 401/.test(ST.err)) { colTokDrop(); ST.err = COL_NOTOK; ST.sig = ''; }
+        // Not let in (Astrolabe is still closed to this account): ask again in 6 hours, not every 5 minutes.
+        else if (/HTTP 403/.test(ST.err)) { ST.hold = Date.now() + ST_HOLD; ST.err = 'not open to this account yet'; }
         render();
       });
   }
@@ -2100,6 +2126,29 @@
     });
   }
 
+  /* ---- the write-only pass (2026-11-13, access step 1) ----
+     Every upload to our server needs the member's sign-in. The member signs in on Astrolabe with their game key;
+     the page then hands this Collector a WRITE-ONLY token (it can send, it cannot read anything back). It is kept
+     here (script manager storage; bookmark version: the game tab's own page storage); the key is never sent by
+     this. Without a token nothing is sent and the badge says so. A refused token (ended, signed out) is dropped. */
+  function colTok() {
+    var o = locJson('wtok', null);
+    return o && typeof o.t === 'string' && /^[A-Za-z0-9_-]{30,60}$/.test(o.t) && Number(o.exp) > Date.now() + 60000 ? o.t : '';
+  }
+  function colTokUser() { var o = locJson('wtok', null); return colTok() && o ? String(o.user || '') : ''; }
+  function colTokSet(o) {
+    if (!o || typeof o.t !== 'string' || !/^[A-Za-z0-9_-]{30,60}$/.test(o.t) || !(Number(o.exp) > Date.now() + 60000)) return false;
+    var cur = locJson('wtok', null);
+    if (cur && cur.t === o.t) return false;
+    locSet('wtok', JSON.stringify({ t: o.t, exp: Number(o.exp), user: String(o.user || '').slice(0, 60) }));
+    try { if (typeof DIRECT === 'object' && DIRECT) DIRECT.dirty = true; } catch (e) {}
+    try { if (typeof ST === 'object' && ST) ST.hold = 0; } catch (e) {}
+    return true;
+  }
+  function colTokDrop() { locSet('wtok', ''); }
+  function colAuth(h) { var t = colTok(); if (t) h.Authorization = 'Bearer ' + t; return h; }
+  var COL_NOTOK = 'not signed in: open Astrolabe and sign in with your game key to share';
+
   /* ---- a signed word to our server (see "seen" in locStart) ---- */
   function colSign(text) {
     var k = ['astrolabe', 'collector', 'hello', '7f3a9c21e5b84d06'].join(':'), enc = new TextEncoder();
@@ -2125,14 +2174,16 @@
     var key = liveKey || locGet('key', ''), who = liveWho || locJson('who', null), s = mkState();
     if (!key || !who || !who.username || !who.registered) return Promise.resolve({ ok: false, msg: 'Open the game once with the Collector, so it knows your API key.' });
     if (s.hold > now) return Promise.resolve({ ok: false, msg: s.holdWhy || 'paused' });
+    if (!colTok()) return Promise.resolve({ ok: false, msg: 'Sign in on Astrolabe (with your game key) so the Collector may share prices.' });
     if (!manual && s.auto >= C.AUTO) return Promise.resolve({ ok: false, msg: 'done for today' });
     if (manual && s.manual >= C.MANUAL) return Promise.resolve({ ok: false, msg: 'You refreshed the prices ' + C.MANUAL + ' times today: that is the limit.' });
     MK_BUSY = true;
-    var HJ = { 'Content-Type': 'application/json', 'X-SOPVP-Client': 'pvpmeta' };
+    var HJ = colAuth({ 'Content-Type': 'application/json', 'X-SOPVP-Client': 'pvpmeta' });
     function done(o) { MK_BUSY = false; s.last = { t: Date.now(), msg: o.msg, ok: o.ok }; mkSave(s); return o; }
     // 1. Is a snapshot due, and is this Collector the one to fetch it?
     return locReq('POST', C.API + '/market/claim', HJ, JSON.stringify({ who: who, manual: !!manual })).then(function (r) {
       var c = {}; try { c = JSON.parse(r.text); } catch (e) {}
+      if (r.status === 401) { colTokDrop(); return done({ ok: false, msg: 'Your sign-in has ended: sign in on Astrolabe again.' }); }
       if (r.status !== 200 || !c.go) return done({ ok: r.status === 200, msg: r.status === 200 ? (c.why || 'Prices are current.') : (c.error === 'alpha' || c.error === 'not_member' ? 'not open to this account yet' : 'server ' + r.status) });
       // 2. One call to the game's public API, with this player's own key.
       if (manual) s.manual++; else s.auto++;
@@ -2205,13 +2256,15 @@
       var d = e.data;
       if (e.origin !== linkOrigin() || !d || typeof d.astroPage !== 'string' || !e.source) return;
       if (d.astroPage === 'hello') {
+        if (d.ctok) colTokSet(d.ctok);   // the member's write-only token, when signed in on that page
         // A hello means that page has (re)started and holds nothing yet: send everything again.
         if (d.need || LINK.win !== e.source) { LINK.sig = ''; LINK.asig = ''; }
         var was = linkLive();
         LINK.win = e.source; LINK.helloAt = Date.now();
         if (!was) { try { render(); } catch (x) {} }
-        try { e.source.postMessage({ astroCol: 'hello', ver: COL_VER, hasKey: !!(live() || {}).key, local: locGet('localOff', '') !== '1', market: mkOn(), mk: mkState(), linked: true }, linkOrigin()); } catch (x) {}
+        try { e.source.postMessage({ astroCol: 'hello', ver: COL_VER, hasKey: !!(live() || {}).key, local: locGet('localOff', '') !== '1', market: mkOn(), mk: mkState(), linked: true, signed: !!colTok() }, linkOrigin()); } catch (x) {}
         linkTick();
+      } else if (d.astroPage === 'signout') { colTokDrop(); try { render(); } catch (x) {}
       } else if (d.astroPage === 'refresh-market') {
         var l = live() || {};
         mkRun(true, l.key, l.who).then(function (r) { try { e.source.postMessage({ astroCol: 'market', id: d.id, ok: r.ok, msg: r.msg }, linkOrigin()); } catch (x) {} });
@@ -2232,14 +2285,22 @@
     // The word is signed (HMAC-SHA256 over the account, the version and the time), and the server only
     // takes a fresh one: a copied or hand-typed request is refused. The signing key sits in this public
     // script, so this keeps out replays and guesses, not someone who reads and re-runs the code.
+    // One hello per answer: any answer of the server counts as done until the next 6-hour hello (a refusal such as
+    // another account's game tab is not asked again every few seconds). Only 401 (the token ended: dropped) and a
+    // network failure (tried again after 10 minutes) make it try again.
+    var SEEN = { ok: false, wait: 0 };
     var seen = function () {
-      var l = live(); if (!l) return;
+      var l = live(); if (!l || !colTok()) return;
       var ts = Date.now();
+      SEEN.ok = true;
       colSign('seen|' + l.who.registered + '|' + COL_VER + '|' + ts).then(function (sig) {
-        return locReq('POST', locCfg().API + '/collector/seen', { 'Content-Type': 'application/json', 'X-SOPVP-Client': 'pvpmeta' }, JSON.stringify({ who: l.who, ver: COL_VER, ts: ts, sig: sig }));
-      }).catch(function () {});
+        return locReq('POST', locCfg().API + '/collector/seen', colAuth({ 'Content-Type': 'application/json', 'X-SOPVP-Client': 'pvpmeta' }), JSON.stringify({ who: l.who, ver: COL_VER, ts: ts, sig: sig }));
+      }).then(function (r) { if (r && r.status === 401) { colTokDrop(); SEEN.ok = false; } })
+        .catch(function () { SEEN.ok = false; SEEN.wait = Date.now() + 10 * 60000; });
     };
-    setTimeout(seen, 20000);
+    // A token arriving later (the member just signed in), or a game that loads late: the hello goes out then.
+    setInterval(function () { if (!SEEN.ok && colTok() && Date.now() > SEEN.wait) seen(); }, 15000);
+    setTimeout(function () { if (!SEEN.ok) seen(); }, 20000);
     setInterval(seen, 6 * 3600000);
   }
 
@@ -2247,7 +2308,7 @@
   function siteMode(ver) {
     var origin = location.origin;
     function post(o) { try { window.postMessage(o, origin); } catch (e) {} }
-    function hello() { post({ astroCol: 'hello', ver: ver, hasKey: !!locGet('key', ''), local: locGet('localOff', '') !== '1', market: mkOn(), mk: mkState() }); }
+    function hello() { post({ astroCol: 'hello', ver: ver, hasKey: !!locGet('key', ''), local: locGet('localOff', '') !== '1', market: mkOn(), mk: mkState(), signed: !!colTok() }); }
     function sendState() {
       var txt = locGet('state', ''), t = Number(locGet('stateT', '0'));
       if (txt && t && locGet('localOff', '') !== '1') post({ astroCol: 'state', t: t, txt: txt, assets: locGet('assets', '') });
@@ -2255,7 +2316,8 @@
     window.addEventListener('message', function (e) {
       var d = e.data;
       if (e.origin !== origin || !d || typeof d.astroPage !== 'string') return;
-      if (d.astroPage === 'hello') { hello(); sendState(); }
+      if (d.astroPage === 'hello') { if (d.ctok) colTokSet(d.ctok); hello(); sendState(); }
+      else if (d.astroPage === 'signout') colTokDrop();
       else if (d.astroPage === 'refresh-market') mkRun(true).then(function (r) { post({ astroCol: 'market', id: d.id, ok: r.ok, msg: r.msg }); });
     });
     try { if (typeof GM_addValueChangeListener === 'function') GM_addValueChangeListener('astro:stateT', function () { sendState(); }); } catch (e) {}
@@ -2333,16 +2395,19 @@
   function render() {
     try {
       var on = S.inputs.direct === true, upd = colUpdate();
-      var st = !on ? '' : (DIRECT.err ? 'bad' : (upd ? 'warn' : (DIRECT.ok ? 'ok' : '')));
+      var st = !on ? '' : (!colTok() ? 'warn' : (DIRECT.err ? 'bad' : (upd ? 'warn' : (DIRECT.ok ? 'ok' : ''))));
       colDot.className = st;
       colLbl.textContent = upd ? 'Astrolabe Collector · update' : 'Astrolabe Collector';
       colBox.style.display = COL.open ? 'block' : 'none';
       if (!COL.open) return;
       var h = '<b>Astrolabe Collector</b> <span class="mu">v' + colEsc(COL_VER) + (COL_BOOK ? ' · bookmark' : '') + '</span>';
       if (upd) h += '<div class="row warn">A new version is out: ' + colEsc(COL.latest) + '.</div><div class="row"><button class="pri" id="c_upd">Update</button> <span class="mu">opens Tampermonkey, then click Update there</span></div>';
+      var tu = colTokUser();
       if (!on) h += '<div class="row warn">Sending is off.</div>';
+      else if (!colTok()) h += '<div class="row warn">Not signed in: nothing is shared. Click <b>Open Astrolabe</b> below and sign in there with your game key; this Collector then gets a pass that can only send.</div>';
       else if (DIRECT.err) h += '<div class="row bad">Sending failed (' + colEsc(DIRECT.err) + '); it tries again in a few minutes.</div>';
       else h += '<div class="row ok">' + (DIRECT.ok ? 'Up to date with the planner, ' + colAgo(DIRECT.ok) : (DIRECT.busy ? 'Sending...' : 'Waiting for something new')) + '.</div>';
+      if (on && tu) h += '<div class="mu">Sharing as ' + colEsc(tu) + ' (signed in on Astrolabe).</div>';
       if (DIRECT.sent) h += '<div class="mu">' + DIRECT.sent + ' items sent this session' + (DIRECT.wait ? ', ' + DIRECT.wait + ' waiting' : '') + '.</div>';
       var n = ARC.n || {};
       h += '<div class="mu">Kept in this browser: ' + (n.squad || 0) + ' squadron battles, ' + (n.duel || 0) + ' Arena duels, ' + (n.roster || 0) + ' Squadron Groups, ' + (n.map || 0) + ' maps.</div>';
