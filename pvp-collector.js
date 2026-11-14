@@ -1,12 +1,12 @@
-/* Stellar Odyssey – Astrolabe Collector 2.3.0 (bookmark version). Loaded by the bookmarklet on the game page. */
+/* Stellar Odyssey – Astrolabe Collector 2.3.1 (bookmark version). Loaded by the bookmarklet on the game page. */
 (function () {
   'use strict';
-  if (location.hostname === 'johnnyboyqc.github.io' || window.__ASTRO_SITE_TEST) { siteMode("2.3.0"); return; }
+  if (location.hostname === 'johnnyboyqc.github.io' || window.__ASTRO_SITE_TEST) { siteMode("2.3.1"); return; }
   var MARK = document.documentElement;
   if (MARK && MARK.getAttribute('data-sopvp-col')) { try { window.dispatchEvent(new CustomEvent('sopvp-col-show')); } catch (e) {} return; }
   if (MARK) MARK.setAttribute('data-sopvp-col', '1');
 
-  var COL_VER = "2.3.0";
+  var COL_VER = "2.3.1";
   /* ============================================================
      Astrolabe Collector for Stellar Odyssey (2.3.0; it was the PvP Collector)
      2.3.0 (2026-11-13): shares only after the member signed in on Astrolabe with their game key; the page
@@ -1194,7 +1194,7 @@
   }
 
   /* ============================================================
-     FROM ASTROLABE 3.22.13 (copied unchanged by the build step)
+     FROM ASTROLABE 3.22.14 (copied unchanged by the build step)
      ============================================================ */
 
   var AR_MAX = 200;
@@ -2267,7 +2267,8 @@
       } else if (d.astroPage === 'signout') { colTokDrop(); try { render(); } catch (x) {}
       } else if (d.astroPage === 'refresh-market') {
         var l = live() || {};
-        mkRun(true, l.key, l.who).then(function (r) { try { e.source.postMessage({ astroCol: 'market', id: d.id, ok: r.ok, msg: r.msg }, linkOrigin()); } catch (x) {} });
+        // auto: the page's hourly timer, not the member's click (page 2026-11-13); an older page sends no such word = a click.
+        mkRun(d.auto !== true, l.key, l.who).then(function (r) { try { e.source.postMessage({ astroCol: 'market', id: d.id, ok: r.ok, msg: r.msg }, linkOrigin()); } catch (x) {} });
       }
     });
   }
@@ -2318,7 +2319,7 @@
       if (e.origin !== origin || !d || typeof d.astroPage !== 'string') return;
       if (d.astroPage === 'hello') { if (d.ctok) colTokSet(d.ctok); hello(); sendState(); }
       else if (d.astroPage === 'signout') colTokDrop();
-      else if (d.astroPage === 'refresh-market') mkRun(true).then(function (r) { post({ astroCol: 'market', id: d.id, ok: r.ok, msg: r.msg }); });
+      else if (d.astroPage === 'refresh-market') mkRun(d.auto !== true).then(function (r) { post({ astroCol: 'market', id: d.id, ok: r.ok, msg: r.msg }); });
     });
     try { if (typeof GM_addValueChangeListener === 'function') GM_addValueChangeListener('astro:stateT', function () { sendState(); }); } catch (e) {}
     setInterval(sendStateIfNew, 5000);
